@@ -40,9 +40,7 @@ class PibotControl:
     # The convention is anticlockwise -> positive angle, clockwise -> negative angle
     def set_angle_deg(self, theta):
         if(self.mode == 1):
-            radius = 0.08 # radius = baseline/2, in measurement, baseline is 15cm, which is 0.15m.
-            if theta < 0:
-                radius = 0.085
+            radius = 0.06 # radius = baseline/2, in measurement, baseline is 15cm, which is 0.15m.
             unit_disp = (theta / 180 * np.pi * radius) / 0.00534
             
             # We are trying to make it turn, so we have to make different sign on each.

@@ -91,27 +91,37 @@ class Operate:
             dt = time.time() - self.control_clock
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
+            drive_meas = Drive(left_speed, right_speed, dt)
         if(self.pibot_control.get_mode() == 1):
             # A Place holder function
             left_speed, right_speed = self.command['wheel_speed'][0] , self.command['wheel_speed'][1]
             if(left_speed > right_speed):
                 self.pibot_control.set_angle_deg(-45)
-                left_speed = 0.8
-                right_speed = -0.8
+                left_speed = 0.5
+                right_speed = -0.5
+                theta = 45
+                dist = theta / 180 * np.pi * 0.06
             if(right_speed > left_speed):
                 self.pibot_control.set_angle_deg(45)
-                left_speed = -0.8
-                right_speed = 0.8
+                left_speed = -0.5
+                right_speed = 0.5
+                theta = 45
+                dist = theta / 180 * np.pi * 0.06
             if(left_speed + right_speed > 0):
                 self.pibot_control.set_displacement(0.2)
                 left_speed = 0.6
                 right_speed = 0.6
+                dist = 0.2
             if(left_speed + right_speed < 0):
                 self.pibot_control.set_displacement(-0.2)
                 left_speed = -0.6
                 right_speed = -0.6
-            dt = time.time() - self.control_clock
-            drive_meas = Drive(left_speed, right_speed, dt)
+                dist = 0.2
+            if(left_speed == 0 and right_speed == 0):
+                dist = 0
+            drive_meas = Drive(left_speed, right_speed, dist/abs(left_speed+0.0000001))
+            
+            
             self.control_clock = time.time()
 
         return drive_meas
