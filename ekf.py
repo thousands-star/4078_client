@@ -65,7 +65,7 @@ class EKF:
         with open(fname, 'w') as map_f:
             json.dump(d, map_f, indent=4)
 
-    def load_map(self, fname="truemap.txt"):
+    def load_map(self, fname="truemap_cv.txt"):
         with open(fname, 'r') as map_f:
             d = json.load(map_f)
             

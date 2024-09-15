@@ -20,6 +20,11 @@ from slam.aruco_sensor import ArucoSensor
 sys.path.insert(0,"{}/cv/".format(os.getcwd()))
 from cv.detector import *
 
+# import Path Planning components (M4)
+from path_planner.path_planning import PathPlan
+from path_planner.path_planning import MapReader
+from path_planner.path_planning import PathPlanner
+
 
 class Operate:
     def __init__(self, args):
@@ -57,6 +62,13 @@ class Operate:
                 self.obj_detector = YOLODetector(r"C:\Users\Public\ECE4078\project\cv\model\YOLO_best.pt", use_gpu=False)
             self.cv_vis = np.ones((480,640,3))* 100
         
+        # Initialise Path Planner (M4)
+        # map_path = 'lab_output/slam.txt'
+        map_path = 'truemap_cv.txt'
+        self.mapReader = MapReader(map_fname= map_path ,search_list='search_list.txt')
+        self.pathplanner = PathPlan(mapReader=self.mapReader,PathPlanner=PathPlanner(grid_resolution=0.06, robot_radius=0.1, target_radius=5))
+        self.pathplanner.start()
+
         # Create a folder to save raw camera images after pressing "i" (M3)
         self.raw_img_dir = 'raw_images/'
         if not os.path.exists(self.raw_img_dir):
@@ -91,37 +103,47 @@ class Operate:
             dt = time.time() - self.control_clock
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
-            drive_meas = Drive(left_speed, right_speed, dt)
         if(self.pibot_control.get_mode() == 1):
             # A Place holder function
-            left_speed, right_speed = self.command['wheel_speed'][0] , self.command['wheel_speed'][1]
-            if(left_speed > right_speed):
-                self.pibot_control.set_angle_deg(-45)
-                left_speed = 0.5
-                right_speed = -0.5
-                theta = 45
-                dist = theta / 180 * np.pi * 0.06
-            if(right_speed > left_speed):
-                self.pibot_control.set_angle_deg(45)
-                left_speed = -0.5
-                right_speed = 0.5
-                theta = 45
-                dist = theta / 180 * np.pi * 0.06
-            if(left_speed + right_speed > 0):
-                self.pibot_control.set_displacement(0.2)
+            # We have to get the waypoint here.
+            message, command = self.pathplanner.give_command([self.ekf.robot.state[0][0],self.ekf.robot.state[1][0],self.ekf.robot.state[2][0]])
+            if(command[0] == "forward"):
+                self.pibot_control.set_displacement(command[1])
+                dist = command[1]
                 left_speed = 0.6
                 right_speed = 0.6
-                dist = 0.2
-            if(left_speed + right_speed < 0):
-                self.pibot_control.set_displacement(-0.2)
-                left_speed = -0.6
-                right_speed = -0.6
-                dist = 0.2
-            if(left_speed == 0 and right_speed == 0):
+            elif(command[0] == "turning"):
+                self.pibot_control.set_angle_deg(command[1])
+                dist = command[1] / 180 * np.pi * 0.06
+                # 1 for anticlockwise, -1 for clockwise
+                if(command[1] > 0):
+                    direction = 1
+                else:
+                    direction = -1
+                left_speed = 0.5 * direction * -1
+                right_speed = 0.5 * direction 
+            elif(command[0] == "stop"):
                 dist = 0
+                left_speed = 0.6
+                right_speed = 0.6
+                pass
+            elif(command[0] == "wait"):
+                dist = 0
+                left_speed = 0.6
+                right_speed = 0.6
+                time.sleep(command[1])
+                pass
+            
+            robotState = self.ekf.robot.state
+            x = np.round(robotState[0],2)
+            y = np.round(robotState[1],2)
+            theta = robotState[2] # In radian
+            theta_degree = theta * 180 / np.pi
+            while(abs(theta_degree)>360):
+                theta_degree = theta_degree % 360 
+            theta_degree = np.round(theta_degree,2)
+            self.notification = message + f"X:{x} Y:{y} A:{theta_degree}"
             drive_meas = Drive(left_speed, right_speed, dist/abs(left_speed+0.0000001))
-            
-            
             self.control_clock = time.time()
 
         return drive_meas
@@ -265,7 +287,20 @@ class Operate:
             if event.type == pygame.KEYDOWN and event.key == pygame.K_a:
                 mode = self.pibot_control.get_mode()
                 if(mode == 0):
+                    self.notification = "System might experience a waiting time of 10+ secs.."
+                    # self.pathplanner.start()
                     self.notification = "The bot is now in autonomous driving mode"
+                    # Have to turn on ekf first!
+                    if(self.ekf_on is False):
+                        self.notification = "You have to start slam first!"
+                    else:
+                        mode = self.ekf.get_mode()
+                        if(mode == True):
+                            self.notification = "SLAM will import from truemap."
+                            self.ekf.switch_off_updating()
+                        if(mode == False):
+                            self.notification = "SLAM will update the marker from EKF."
+                            self.ekf.switch_on_updating()
                     self.pibot_control.set_mode(mode = 1)
                 if(mode == 1):
                     self.notification = "The bot is now in manual driving mode"
@@ -280,11 +315,11 @@ class Operate:
                 pass # TODO
             # turn left
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
-                self.command['wheel_speed'] = [-0.35, 0.35]
+                self.command['wheel_speed'] = [-0.45, 0.45]
                 pass # TODO
             # drive right
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
-                self.command['wheel_speed'] = [0.35, -0.35]
+                self.command['wheel_speed'] = [0.45, -0.45]
                 pass # TODO
             # stop
             elif event.type == pygame.KEYUP or (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE):
