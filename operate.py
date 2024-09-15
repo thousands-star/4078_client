@@ -37,7 +37,12 @@ class Operate:
                         'run_obj_detector': False,                       
                         'save_obj_detector': False,
                         'save_image': False,
+                        'multiple_round_command': None,
                         }
+        self.command_cache = {'wait': [0,0],
+                              'observe': [],
+                              'observe-wait': [],
+                                }
                         
         # TODO: Tune PID parameters here. If you don't want to use PID, set use_pid = 0
         self.pibot_control.set_pid(use_pid=0, kp=1, ki=0, kd=0)
@@ -104,8 +109,32 @@ class Operate:
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
         if(self.pibot_control.get_mode() == 1):
+            robotState = self.ekf.robot.state
+            x = np.round(robotState[0],2)
+            y = np.round(robotState[1],2)
+            theta = robotState[2] # In radian
+            theta_degree = theta * 180 / np.pi
+            while(abs(theta_degree)>360):
+                theta_degree = theta_degree % 360 
+            theta_degree = np.round(theta_degree,2)
+
+
             # A Place holder function
-            # We have to get the waypoint here.
+            # We have to get the command here.
+            if(self.command['multiple_round_command'] == 'wait'):
+                command_param = self.command_cache['wait']
+                if(time.time() - command[0] > command_param[1]):
+                    self.command['multiple_round_command'] = None
+                    self.notification = "waiting"
+                    return Drive(0,0,0)
+            # elif(self.command['multiple_round_command'] == 'observe'):
+            #     if len(self.command_cache["observe"]) > 0:
+            #         message = "Observing"
+            #         command = self.command_cache["observe"].pop()
+            #     pass
+                    
+
+                # Check all those multiple_round_command
             message, command = self.pathplanner.give_command([self.ekf.robot.state[0][0],self.ekf.robot.state[1][0],self.ekf.robot.state[2][0]])
             if(command[0] == "forward"):
                 self.pibot_control.set_displacement(command[1])
@@ -131,18 +160,27 @@ class Operate:
                 dist = 0
                 left_speed = 0.6
                 right_speed = 0.6
-                time.sleep(command[1])
+                self.command["multiple_round_command"] == "wait"
+                self.command_cache["wait"] = [time.time(), command[1]]
                 pass
+            # elif(command[0] == "observe"):
+            #     self.command["multiple_round_command"] == "observe"
+            #     command_queue = []
+            #     command_queue.append(["turning"], 15)
+            #     command_queue.append(["observe-wait"], 1)
+            #     command_queue.append(["turning"],-15)
+            #     command_queue.append(["observe-wait"], 1)
+            #     command_queue.append(["turning"],-15)
+            #     command_queue.append(["observe-wait"], 1)
+            #     command_queue.append(["turning"], 15)
+            #     command_queue.append(["observe-wait"], 1)
+            #     self.command_cache["observe"] = command_queue
+
+            # elif(command[0] == "observe-wait"):
+            #     self.command["multiple_round_command"] == "observe-wait"
             
-            robotState = self.ekf.robot.state
-            x = np.round(robotState[0],2)
-            y = np.round(robotState[1],2)
-            theta = robotState[2] # In radian
-            theta_degree = theta * 180 / np.pi
-            while(abs(theta_degree)>360):
-                theta_degree = theta_degree % 360 
-            theta_degree = np.round(theta_degree,2)
-            self.notification = message + f"X:{x} Y:{y} A:{theta_degree}"
+            print(command[0] + " " + str[command[1]] + f" X:{x} Y:{y} A:{theta_degree}")
+            self.notification = message
             drive_meas = Drive(left_speed, right_speed, dist/abs(left_speed+0.0000001))
             self.control_clock = time.time()
 

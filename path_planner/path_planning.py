@@ -62,10 +62,11 @@ class PathPlan:
         print("Path planning initialized...")
         
         self.command_queue= []
-        self.replanning_interval = 5
+        self.replanning_interval = 3
         self.mapReader = mapReader
         self.algorithm = PathPlanner
         self.goal_count = 0
+        self.observe_flag = 0
     
     def start(self):
         obstacle_grid_file = "obstacle_grid.txt"
@@ -109,10 +110,12 @@ class PathPlan:
                     pass
                 else:
                     self.command_queue.append(['turning', theta])
+                    self.command_queue.append(['wait', 0.5])
                     est_robot_pose = [est_robot_pose[0], est_robot_pose[1], est_robot_pose[2]+MathTools.rad(theta)]
                 
                 disp = MathTools.find_euclidean_distance([px,py],est_robot_pose)
                 self.command_queue.append(['forward',disp])
+                self.command_queue.append(['wait', 0.5])
                 est_robot_pose = [px, py, est_robot_pose[2]]
                 planned_point = planned_point + 1
             else:
@@ -120,7 +123,6 @@ class PathPlan:
 
 
     def give_command(self, robot_pose):
-
         if(self.goal_count >= len(self.goals)):
             return ("Autonomous Driving Finished",['stop', 0])
         else:
@@ -135,7 +137,18 @@ class PathPlan:
             return ("Target Found", ['wait', waiting_time])
 
         if len(self.command_queue) == 0:
-            self.plan_command(robot_pose=robot_pose, goal=goal)
+            if self.observe_flag == 0:
+                self.command_queue.append(['turning'],15)
+                self.command_queue.append(['wait'],0.5)
+                self.command_queue.append(['turning'],-15)
+                self.command_queue.append(['wait'],0.5)
+                self.command_queue.append(['turning'],-15)
+                self.command_queue.append(['wait'],0.5)
+                self.command_queue.append(['turning'],15)
+                self.command_queue.append(['wait'],0.5)
+                self.observe_flag == 1
+            if self.observe_flag == 1:
+                self.plan_command(robot_pose=robot_pose, goal=goal)
             return ("Fixed Interval Replanning", self.command_queue.pop(0))
             
         else:

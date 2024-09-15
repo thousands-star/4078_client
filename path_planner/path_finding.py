@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import time
 
 
+
 class PathPlanner:
 
     def __init__(self, grid_resolution, robot_radius, target_radius=0.1, obstacle_size=0.1):
@@ -278,7 +279,10 @@ class PathPlanner:
             f.write(f"{self.grid_width_x},{self.grid_width_y}\n")
             for row in self.obstacle_grid:
                 f.write(','.join(map(str, row)) + '\n')
-
+    
+    # Besides importing obstacle_grid
+    # also instantiate mapReader, and get fruit & fruit_location & aruco_location
+    # use add_square_obstacles to add things inside
     def import_obstacle_grid(self, filename="obstacle_grid.txt"):
         with open(filename, 'r') as f:
             # Read grid bounds and dimensions
