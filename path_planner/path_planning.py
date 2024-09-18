@@ -57,7 +57,7 @@ class MapReader:
     def compute_goal_positions(self, fruit_list, fruit_positions, search_list):
         return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
     
-class PathPlan:
+class CommandPlan:
     def __init__(self, mapReader:MapReader, PathPlanner:PathPlanner) -> None:
         print("Path planning initialized...")
         
@@ -121,8 +121,35 @@ class PathPlan:
             else:
                 break
 
+    def dummy_plan(self, robot_pose, waypoints):
+        robot_x = robot_pose[0]
+        robot_y = robot_pose[1]
+        robot_theta = robot_pose[2]
+        print(str(robot_x) + ":" + str(type(robot_x)))
+        waypoint_x, waypoint_y = waypoints[0], waypoints[1]
+        est_robot_pose = [robot_x, robot_y, robot_theta]
+        planned_point = 0
+        for px,py in zip(waypoint_x,waypoint_y):
+            print(f"Going to {px}, {py}")
+            if(planned_point < self.replanning_interval):
+                theta = MathTools.find_turning_angle([px,py],est_robot_pose)
+                if(abs(theta) < 10):
+                    pass
+                else:
+                    self.command_queue.append(['turning', theta])
+                    self.command_queue.append(['wait', 0.5])
+                    est_robot_pose = [est_robot_pose[0], est_robot_pose[1], est_robot_pose[2]+MathTools.rad(theta)]
+                
+                disp = MathTools.find_euclidean_distance([px,py],est_robot_pose)
+                self.command_queue.append(['forward',disp])
+                self.command_queue.append(['wait', 0.5])
+                est_robot_pose = [px, py, est_robot_pose[2]]
+                planned_point = planned_point + 1
+            else:
+                break
 
-    def give_command(self, robot_pose):
+
+    def give_command(self, robot_pose, dummy):
         # This block corresponds to the condition when all goals were found.
         if(self.goal_count >= len(self.goals)):
             return ("Autonomous Driving Finished",['stop', 0])
@@ -135,14 +162,14 @@ class PathPlan:
         if(dist < 0.4):
             if self.observe_flag == 0:
                 self.command_queue.clear()
-                self.command_queue.append(['turning'],15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],-15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],-15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],15)
-                self.command_queue.append(['wait'],0.5)
+                self.command_queue.append(['turning',15])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',-15])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',-15])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',15])
+                self.command_queue.append(['wait',1])
                 self.observe_flag = 1
                 return ("Goal Found Observing",self.command_queue.pop(0))
             if self.observe_flag == 1:
@@ -158,18 +185,21 @@ class PathPlan:
         # This block corresponds to the condition when we dont have any commands in our hand.
         if len(self.command_queue) == 0:
             if self.observe_flag == 0:
-                self.command_queue.append(['turning'],15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],-15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],-15)
-                self.command_queue.append(['wait'],0.5)
-                self.command_queue.append(['turning'],15)
-                self.command_queue.append(['wait'],0.5)
-                self.observe_flag == 1
+                self.command_queue.append(['turning',30])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',-30])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',-30])
+                self.command_queue.append(['wait',1])
+                self.command_queue.append(['turning',30])
+                self.command_queue.append(['wait',1])
+                self.observe_flag = 1
                 return ("Fixed Interval Observing",self.command_queue.pop(0)) 
             if self.observe_flag == 1:
-                self.plan_command(robot_pose=robot_pose, goal=goal)
+                if(dummy):
+                    self.dummy_plan(robot_pose=robot_pose, waypoints = [[0, 0],[0.4,0]])
+                else:
+                    self.plan_command(robot_pose=robot_pose, goal=goal)
                 self.observe_flag = 0
                 return ("Fixed Interval Replanning", self.command_queue.pop(0))
         else:

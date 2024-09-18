@@ -31,6 +31,7 @@ class EKF:
         f_ = f'./ui/8bit/lm_unknown.png'
         self.lm_pics.append(pygame.image.load(f_))
         self.pibot_pic = pygame.image.load(f'./ui/8bit/pibot_top.png')
+        self.var = [0.3, 0.01]
         
     def reset(self):
         self.robot.state = np.zeros((3, 1))
@@ -147,7 +148,7 @@ class EKF:
         F = self.state_transition(drive_meas)
         x = self.get_state_vector()
         Q = self.predict_covariance(drive_meas)
-        Q[0:3,0:3] += 0.05*np.eye(3)
+        Q[0:3,0:3] += self.var[0]*np.eye(3)
         
         # TODO: add your codes here to compute the predicted x
         # update the x to the predicted x
@@ -169,7 +170,7 @@ class EKF:
         z = np.concatenate([lm.position.reshape(-1,1) for lm in measurements], axis=0)
         R = np.zeros((2*len(measurements),2*len(measurements)))
         for i in range(len(measurements)):
-            R[2*i:2*i+2,2*i:2*i+2] = 0.01*np.eye(2)
+            R[2*i:2*i+2,2*i:2*i+2] = self.var[1]*np.eye(2)
 
         # Compute own measurements
         z_hat = self.robot.measure(self.markers, idx_list)
@@ -186,7 +187,9 @@ class EKF:
         self.set_state_vector(updated_x)
         #update P from predicted P
         self.P = (np.eye(len(K))- K@H) @ self.P
-        
+    
+    def set_var(self, Q, R):
+        self.var = [Q,R]
 
     def state_transition(self, drive_meas):
         n = self.number_landmarks()*2 + 3

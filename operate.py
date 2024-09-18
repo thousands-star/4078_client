@@ -21,7 +21,7 @@ sys.path.insert(0,"{}/cv/".format(os.getcwd()))
 from cv.detector import *
 
 # import Path Planning components (M4)
-from path_planner.path_planning import PathPlan
+from path_planner.path_planning import CommandPlan
 from path_planner.path_planning import MapReader
 from path_planner.path_planning import PathPlanner
 
@@ -37,12 +37,8 @@ class Operate:
                         'run_obj_detector': False,                       
                         'save_obj_detector': False,
                         'save_image': False,
-                        'multiple_round_command': None,
                         }
-        self.command_cache = {'wait': [0,0],
-                              'observe': [],
-                              'observe-wait': [],
-                                }
+        self.command_wait = []
                         
         # TODO: Tune PID parameters here. If you don't want to use PID, set use_pid = 0
         self.pibot_control.set_pid(use_pid=0, kp=1, ki=0, kd=0)
@@ -71,7 +67,7 @@ class Operate:
         # map_path = 'lab_output/slam.txt'
         map_path = 'truemap_cv.txt'
         self.mapReader = MapReader(map_fname= map_path ,search_list='search_list.txt')
-        self.pathplanner = PathPlan(mapReader=self.mapReader,PathPlanner=PathPlanner(grid_resolution=0.06, robot_radius=0.1, target_radius=5))
+        self.pathplanner = CommandPlan(mapReader=self.mapReader,PathPlanner=PathPlanner(grid_resolution=0.06, robot_radius=0.1, target_radius=5))
         self.pathplanner.start()
 
         # Create a folder to save raw camera images after pressing "i" (M3)
@@ -109,6 +105,7 @@ class Operate:
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
         if(self.pibot_control.get_mode() == 1):
+            # Notify debugging statement
             robotState = self.ekf.robot.state
             x = np.round(robotState[0],2)
             y = np.round(robotState[1],2)
@@ -117,73 +114,53 @@ class Operate:
             while(abs(theta_degree)>360):
                 theta_degree = theta_degree % 360 
             theta_degree = np.round(theta_degree,2)
-
+            robot_pose = [self.ekf.robot.state[0][0],self.ekf.robot.state[1][0],self.ekf.robot.state[2][0]]
 
             # A Place holder function
             # We have to get the command here.
-            if(self.command['multiple_round_command'] == 'wait'):
-                command_param = self.command_cache['wait']
-                if(time.time() - command[0] > command_param[1]):
-                    self.command['multiple_round_command'] = None
+            if(len(self.command_wait) > 0):
+                currentTime = time.time()
+                if(currentTime - self.command_wait[0] < self.command_wait[1]):
                     self.notification = "waiting"
                     return Drive(0,0,0)
-            # elif(self.command['multiple_round_command'] == 'observe'):
-            #     if len(self.command_cache["observe"]) > 0:
-            #         message = "Observing"
-            #         command = self.command_cache["observe"].pop()
-            #     pass
-                    
+                else:
+                    pass
 
                 # Check all those multiple_round_command
-            message, command = self.pathplanner.give_command([self.ekf.robot.state[0][0],self.ekf.robot.state[1][0],self.ekf.robot.state[2][0]])
+            message, command = self.pathplanner.give_command(robot_pose=robot_pose, dummy=1)
+            
+            print(command[0] + " " + str(command[1]) + f" X:{x} Y:{y} A:{theta_degree}")
+            self.notification = message
+
             if(command[0] == "forward"):
+                self.ekf.set_var = [0.01, 0.1]
                 self.pibot_control.set_displacement(command[1])
                 dist = command[1]
                 left_speed = 0.6
                 right_speed = 0.6
+                drive_meas = Drive(left_speed, right_speed, dist/0.6)
+                return drive_meas
             elif(command[0] == "turning"):
+                self.ekf.set_var = [0.05, 0.1]
                 self.pibot_control.set_angle_deg(command[1])
-                dist = command[1] / 180 * np.pi * 0.06
+                dist = abs(command[1] / 180 * np.pi * 0.06)
                 # 1 for anticlockwise, -1 for clockwise
                 if(command[1] > 0):
-                    direction = 1
+                    left_speed = -0.5
+                    right_speed = 0.5
                 else:
-                    direction = -1
-                left_speed = 0.5 * direction * -1
-                right_speed = 0.5 * direction 
+                    left_speed = 0.5
+                    right_speed = -0.5
+                drive_meas = Drive(left_speed, right_speed, dist/0.5)
+                return drive_meas
             elif(command[0] == "stop"):
-                dist = 0
-                left_speed = 0.6
-                right_speed = 0.6
-                pass
+                drive_meas = Drive(0, 0, 0)
+                return drive_meas
             elif(command[0] == "wait"):
-                dist = 0
-                left_speed = 0.6
-                right_speed = 0.6
-                self.command["multiple_round_command"] == "wait"
-                self.command_cache["wait"] = [time.time(), command[1]]
-                pass
-            # elif(command[0] == "observe"):
-            #     self.command["multiple_round_command"] == "observe"
-            #     command_queue = []
-            #     command_queue.append(["turning"], 15)
-            #     command_queue.append(["observe-wait"], 1)
-            #     command_queue.append(["turning"],-15)
-            #     command_queue.append(["observe-wait"], 1)
-            #     command_queue.append(["turning"],-15)
-            #     command_queue.append(["observe-wait"], 1)
-            #     command_queue.append(["turning"], 15)
-            #     command_queue.append(["observe-wait"], 1)
-            #     self.command_cache["observe"] = command_queue
-
-            # elif(command[0] == "observe-wait"):
-            #     self.command["multiple_round_command"] == "observe-wait"
+                self.command_wait = [time.time(), command[1]]
+                drive_meas = Drive(0, 0, 0)
+                return drive_meas
             
-            print(command[0] + " " + str[command[1]] + f" X:{x} Y:{y} A:{theta_degree}")
-            self.notification = message
-            drive_meas = Drive(left_speed, right_speed, dist/abs(left_speed+0.0000001))
-            self.control_clock = time.time()
-
         return drive_meas
     
     # camera control
