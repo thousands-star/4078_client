@@ -11,7 +11,7 @@ class EKF:
     # lm stands for landmark, ie the aruco markers.
     # Therefore, the state is the concatenation of the robot state and the position of the landmarks.
 
-    def __init__(self, robot):
+    def __init__(self, robot, truemap = None):
         # State components
         self.robot = robot
         self.markers = np.zeros((2,0))
@@ -19,6 +19,8 @@ class EKF:
         #i made it
         self.markers_updating = True
         self.lock_robot = False
+        if truemap != None:
+            self.map_fname = truemap
 
         # Covariance matrix
         self.P = np.zeros((3,3))
@@ -67,7 +69,7 @@ class EKF:
             json.dump(d, map_f, indent=4)
 
     def load_map(self, fname="truemap.txt"):
-        with open(fname, 'r') as map_f:
+        with open(self.map_fname, 'r') as map_f:
             d = json.load(map_f)
             
         self.taglist = []
@@ -120,7 +122,7 @@ class EKF:
     
     def switch_off_updating(self):
         self.set_mode(False)
-        self.load_map()
+        self.load_map(self.map_fname)
         # Update dimension of P
         n = self.number_landmarks()*2 + 3
         P_new = np.zeros((n,n))

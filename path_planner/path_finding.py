@@ -2,7 +2,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-
+import json
 
 
 class PathPlanner:
@@ -294,3 +294,92 @@ class PathPlanner:
             for line in f:
                 row = list(map(lambda x: x == 'True', line.strip().split(',')))
                 self.obstacle_grid.append(row)
+    
+class MathTools():
+    @staticmethod
+    def find_turning_angle(waypoint, robot_pose):
+        ########## TURN ##########        
+        dx = waypoint[0] - robot_pose[0]
+        dy = waypoint[1] - robot_pose[1]
+        theta_r = robot_pose[2]                         # angle of robot from origin
+        theta_w = np.arctan2(dy, dx)                    # angle of waypoint from robot
+        theta_turn = theta_w - theta_r                  # angle to be turned by robot
+        theta_turn = (theta_turn + np.pi) % (2 * np.pi) - np.pi  # normalize angle to [-pi, pi], make sure it always turns the smallest angle
+        theta_deg = float(theta_turn * 180 / np.pi)
+        print(f"Angle calculated: {theta_w} - {theta_r} = {theta_turn}")
+        return theta_deg
+    
+    @staticmethod
+    def find_euclidean_distance(waypoint, robot_pose):
+        ########## GO STRAIGHT ##########
+        # Parameters to go straight
+        # wheel_speed_strg = 0.7
+        # Calculate the distance to move
+        dx = waypoint[0] - robot_pose[0]
+        dy = waypoint[1] - robot_pose[1]
+        d_move = np.sqrt(dx**2 + dy**2)
+        return d_move
+    
+    @staticmethod
+    def rad(deg):
+        return deg/180 * np.pi
+    
+    @staticmethod
+    def deg(rad):
+        return rad / np.pi * 180
+    
+    @staticmethod
+    #constrain the angle in pi to -pi
+    def clamp_angle(rad):
+        # Clamp the angle between -π and π
+        while rad > np.pi:
+            rad -= 2 * np.pi
+        while rad < -np.pi:
+            rad += 2 * np.pi
+        return rad
+    
+class MapReader:
+    def __init__(self, map_fname = None, search_list = None) -> None:
+        self.map_fname = map_fname
+        self.search_list = search_list
+        pass
+
+    def load_map_data(self):
+        filename = self.map_fname
+        with open(filename, 'r') as file:
+            data = json.load(file)
+            fruits, fruit_positions, aruco_positions = [], [], np.empty([10, 2])
+
+            for key, val in data.items():
+                x = np.round(val['x'], 2)
+                y = np.round(val['y'], 2)
+
+                if key.startswith('aruco'):
+                    marker_id = 9 if key.startswith('aruco10') else int(key[5]) - 1
+                    aruco_positions[marker_id] = [x, y]
+                else:
+                    fruits.append(key[:-2])
+                    if len(fruit_positions) == 0:
+                        fruit_positions = np.array([[x, y]])
+                    else:
+                        fruit_positions = np.append(fruit_positions, [[x, y]], axis=0)
+
+            return fruits, fruit_positions, aruco_positions
+        
+    def read_search_list(self):
+        """
+        Read the search order of the target fruits
+        @return: search order of the target fruits
+        """
+        search_list = []
+        with open(self.search_list, 'r') as fd:
+            fruits = fd.readlines()
+
+            for fruit in fruits:
+                search_list.append(fruit.strip())
+
+        return search_list
+    
+    def compute_goal_positions(self, fruit_list, fruit_positions, search_list):
+        return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
+    

@@ -20,12 +20,6 @@ from slam.aruco_sensor import ArucoSensor
 sys.path.insert(0,"{}/cv/".format(os.getcwd()))
 from cv.detector import *
 
-# import Path Planning components (M4)
-from path_planner.path_planning import CommandPlan
-from path_planner.path_planning import MapReader
-from path_planner.path_planning import PathPlanner
-
-
 class Operate:
     def __init__(self, args):
         
@@ -63,12 +57,6 @@ class Operate:
                 self.obj_detector = YOLODetector(r"C:\Users\Public\ECE4078\project\cv\model\YOLO_best.pt", use_gpu=False)
             self.cv_vis = np.ones((480,640,3))* 100
         
-        # Initialise Path Planner (M4)
-        # map_path = 'lab_output/slam.txt'
-        map_path = 'truemap_cv.txt'
-        self.mapReader = MapReader(map_fname= map_path ,search_list='search_list.txt')
-        self.pathplanner = CommandPlan(mapReader=self.mapReader,PathPlanner=PathPlanner(grid_resolution=0.06, robot_radius=0.1, target_radius=5))
-        self.pathplanner.start()
 
         # Create a folder to save raw camera images after pressing "i" (M3)
         self.raw_img_dir = 'raw_images/'
@@ -104,63 +92,6 @@ class Operate:
             dt = time.time() - self.control_clock
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
-        if(self.pibot_control.get_mode() == 1):
-            # Notify debugging statement
-            robotState = self.ekf.robot.state
-            x = np.round(robotState[0],2)
-            y = np.round(robotState[1],2)
-            theta = robotState[2] # In radian
-            theta_degree = theta * 180 / np.pi
-            while(abs(theta_degree)>360):
-                theta_degree = theta_degree % 360 
-            theta_degree = np.round(theta_degree,2)
-            robot_pose = [self.ekf.robot.state[0][0],self.ekf.robot.state[1][0],self.ekf.robot.state[2][0]]
-
-            # A Place holder function
-            # We have to get the command here.
-            if(len(self.command_wait) > 0):
-                currentTime = time.time()
-                if(currentTime - self.command_wait[0] < self.command_wait[1]):
-                    self.notification = "waiting"
-                    return Drive(0,0,0)
-                else:
-                    pass
-
-                # Check all those multiple_round_command
-            message, command = self.pathplanner.give_command(robot_pose=robot_pose, dummy=1)
-            
-            print(command[0] + " " + str(command[1]) + f" X:{x} Y:{y} A:{theta_degree}")
-            self.notification = message
-
-            if(command[0] == "forward"):
-                self.ekf.set_var = [0.01, 0.1]
-                self.pibot_control.set_displacement(command[1])
-                dist = command[1]
-                left_speed = 0.6
-                right_speed = 0.6
-                drive_meas = Drive(left_speed, right_speed, dist/0.6)
-                return drive_meas
-            elif(command[0] == "turning"):
-                self.ekf.set_var = [0.05, 0.1]
-                self.pibot_control.set_angle_deg(command[1])
-                dist = abs(command[1] / 180 * np.pi * 0.06)
-                # 1 for anticlockwise, -1 for clockwise
-                if(command[1] > 0):
-                    left_speed = -0.5
-                    right_speed = 0.5
-                else:
-                    left_speed = 0.5
-                    right_speed = -0.5
-                drive_meas = Drive(left_speed, right_speed, dist/0.5)
-                return drive_meas
-            elif(command[0] == "stop"):
-                drive_meas = Drive(0, 0, 0)
-                return drive_meas
-            elif(command[0] == "wait"):
-                self.command_wait = [time.time(), command[1]]
-                drive_meas = Drive(0, 0, 0)
-                return drive_meas
-            
         return drive_meas
     
     # camera control
@@ -299,28 +230,6 @@ class Operate:
     # Study the code in pibot.py for more information
     def update_keyboard(self):
         for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_a:
-                mode = self.pibot_control.get_mode()
-                if(mode == 0):
-                    self.notification = "System might experience a waiting time of 10+ secs.."
-                    # self.pathplanner.start()
-                    self.notification = "The bot is now in autonomous driving mode"
-                    # Have to turn on ekf first!
-                    if(self.ekf_on is False):
-                        self.notification = "You have to start slam first!"
-                    else:
-                        mode = self.ekf.get_mode()
-                        if(mode == True):
-                            self.notification = "SLAM will import from truemap."
-                            self.ekf.switch_off_updating()
-                        if(mode == False):
-                            self.notification = "SLAM will update the marker from EKF."
-                            self.ekf.switch_on_updating()
-                    self.pibot_control.set_mode(mode = 1)
-                if(mode == 1):
-                    self.notification = "The bot is now in manual driving mode"
-                    self.pibot_control.set_mode(mode = 0)
-                pass # TODO
             if event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
                 self.command['wheel_speed'] = [0.6, 0.6]
                 pass # TODO
