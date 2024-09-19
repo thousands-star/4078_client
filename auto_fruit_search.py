@@ -19,18 +19,28 @@ import slam.aruco_sensor as aruco
 # import CV components (M3)
 sys.path.insert(0,"{}/cv/".format(os.getcwd()))
 from cv.detector import *
+from cv.predictor import Fruit_Predictor
 
 # import Path Planning components (M4)
-from path_planner.command_planning import MapReader
+from path_planner.path_finding import MapReader
 from path_planner.path_finding import PathPlanner
-from path_planner.command_planning import MathTools as mt
+from path_planner.path_finding import MathTools as mt
 
 class Command_Controller:
-    def __init__(self, ekf:EKF, aruco:aruco.ArucoSensor, control:PibotControl):
+    def __init__(self, 
+                 ekf:EKF, 
+                 aruco:aruco.ArucoSensor, 
+                 control:PibotControl, 
+                 detector:ObjectDetector,
+                 predictor:Fruit_Predictor
+                 ):
         self.ekf = ekf
         self.aruco_sensor = aruco
         self.control = control
         self.img = None
+        self.detector = detector
+        self.predictor = predictor
+        self.current_goal = 0
         # Load the map onto the ekf
         ekf.switch_off_updating()
         self.control.set_mode(1)
@@ -39,6 +49,17 @@ class Command_Controller:
     def get_new_state(self, drive_meas, period = 10):
         self.img = self.control.get_image()
         measurements, self.aruco_img = self.aruco_sensor.detect_marker_positions(self.img)
+        # Drop camera model when it detected less than 2 marker
+        if(len(measurements) < 2):
+            measurements = []
+        # # Computer Vision
+        # # Perform YOLO detection using the `YOLODetector`
+        # formatted_output, _ = self.detector.detect_single_image(self.img)
+        # for prediction in formatted_output:
+        #     fruit_type, x_center, y_center, width, height = prediction
+        #     position = self.get_fruit_position_relative_to_camera(prediction)
+        #     print(f"Detected {fruit_type} at camera position {position}")
+
         self.ekf.predict(drive_meas)
         self.ekf.add_landmarks(measurements)
         self.ekf.update(measurements)
@@ -49,6 +70,9 @@ class Command_Controller:
         for i in range(period-1):
             self.img = self.control.get_image()
             measurements, self.aruco_img = self.aruco_sensor.detect_marker_positions(self.img)
+            # Drop camera model when it detected less than 2 marker
+            if(len(measurements) < 2):
+                measurements = []
             self.ekf.predict(Drive(0,0,0))
             self.ekf.add_landmarks(measurements)
             self.ekf.update(measurements)
@@ -116,7 +140,9 @@ if __name__ == "__main__":
     # start timer
     run_timer = time.time()
 
+    # M2 Initialization
     # Initialize the Pibot Control
+    print("--------------------Initializing ROBOT & EKF--------------------")
     pictrl = PibotControl(args.ip,args.port)
 
     # Load camera and wheel calibration parameters
@@ -124,27 +150,30 @@ if __name__ == "__main__":
     dist_coeffs = np.loadtxt(f"{args.calib_dir}/distCoeffs.txt", delimiter=',')
     scale = np.loadtxt(f"{args.calib_dir}/scale.txt", delimiter=',')
     baseline = np.loadtxt(f"{args.calib_dir}/baseline.txt", delimiter=',')
-
+    
     # Initialize the Robot object
     robot = Robot(baseline, scale, camera_matrix, dist_coeffs)
 
-    # Initialize the MapReader object
-    map_reader = MapReader(map_fname= args.map, search_list= args.search_list)
-
-    # Get true aruco pos list
-    fruits_list, fruits_true_pos, aruco_true_pos = map_reader.load_map_data()
-    
     # Initialize EKF with the robot object and provided true map.
     ekf = EKF(robot, truemap="truemap.txt")
 
     # Initialize the ArUco detector (for updating pose based on markers)
     aruco_detector = aruco.ArucoSensor(robot, marker_length=0.06)
 
-    # Initialise driver
-    # drive_controller = MoveToGoalController(robot, K_pw = 1.5, K_pv = 1, ekf = ekf, ppi = ppi, aruco_detector=aruco_detector, aruco_true_pos_list=aruco_true_pos)
-    # robot_pose = np.array([0,0,args.initialOrientation*np.pi])
+    print("====================Initializing Fruit Detector====================")
+            # Initialise detector (M3)
+    obj_detector = YOLODetector(r"C:\Users\Public\ECE4078\project\cv\model\YOLO_best.pt", use_gpu=False)
+    fruit_predictor = Fruit_Predictor(camera_matrix_file=camera_matrix)
+    cv_vis = np.ones((480,640,3))* 100
 
-    print("Initializing Path Planner...")
+
+    print("====================Initializing Path Planner====================")
+
+    # Initialize the MapReader object
+    map_reader = MapReader(map_fname= args.map, search_list= args.search_list)
+
+    # Get true aruco pos list
+    fruits_list, fruits_true_pos, aruco_true_pos = map_reader.load_map_data()
 
     path_planner = PathPlanner(grid_resolution=0.1, robot_radius = 0.1, target_radius = 5, obstacle_size = 0.1)
 
@@ -154,8 +183,6 @@ if __name__ == "__main__":
     goals = path_planner.compute_goal_positions(fruits_list, fruits_true_pos, search_targets)
     print(f"Searching in order: {search_targets}")
     print(f"Goal positions: {goals}")
-
-    cmd_controller = Command_Controller(ekf=ekf,aruco=aruco_detector,control=pictrl)
 
     # Add the markers as obstacles
     for marker in aruco_true_pos:
@@ -168,12 +195,21 @@ if __name__ == "__main__":
     start_x, start_y = 0, 0
 
     goal_count = 0
+
+    cmd_controller = Command_Controller(ekf=ekf,
+                                        aruco=aruco_detector,
+                                        control=pictrl,
+                                        detector=obj_detector,
+                                        predictor=fruit_predictor
+                                        )
     
     # Process each target's waypoints
     print("\nAutonomous Driving!")
     goal_count = 0
     for goal in goals:
         print(f"Navigating to {search_targets[goal_count]}")
+        cmd_controller.current_goal = search_targets[goal_count]
+
         waypoint_x, waypoint_y = path_planner.plan_path(start_x, start_y, goal[0],goal[1])
         # Reverse the waypoints
         waypoint_x = waypoint_x[::-1]
