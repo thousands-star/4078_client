@@ -2,12 +2,12 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+from abc import ABC, abstractmethod
 import json
-
 
 class PathPlanner:
 
-    def __init__(self, grid_resolution, robot_radius, target_radius=0.1, obstacle_size=0.1):
+    def __init__(self, grid_resolution, robot_radius, target_radius, obstacle_size=0.1):
         """
         Initialize grid for A* path planning
 
@@ -20,25 +20,28 @@ class PathPlanner:
         self.grid_resolution = grid_resolution  # Grid resolution
         self.robot_radius = robot_radius  # Robot's safety radius
         # Defining the grid bounds
-        self.grid_min_x, self.grid_min_y = -1.5, 1.5
-        self.grid_max_x, self.grid_max_y = -1.5, 1.5
+        self.grid_min_x, self.grid_min_y = -1.6, 1.6
+        self.grid_max_x, self.grid_max_y = -1.6, 1.6
         self.obstacle_grid = None
         self.grid_width_x, self.grid_width_y = 0.05, 0.05  # Grid resolution in x and y
-        self.motion_model = self.define_motion_model()
         self.obstacle_size = obstacle_size
-
         self.obstacle_x = []
         self.obstacle_y = []
-        self.create_walls(-1.5, -1.5, 1.5, 1.5, 0.01)
+        self.create_walls(-1.6, -1.6, 1.6, 1.6, 0.01)
 
-
+    def set_mode(self, mode):
+        self.mode = mode
+    
+    def get_mode(self):
+        return self.mode
+    
     def add_square_obstacle(self, x, y, size=0.08, resolution=0.01):
         """
         Add a square obstacle around the point (x, y).
 
         x, y: Center of the square
         size: Side length of the square
-        resolution: Grid resolution for obstacle boundary points
+        resolution: Grid resolution for obstacle boundary points (0.08/0.01 = 8 points for boundary)
         """
         half_size = size / 2
 
@@ -63,6 +66,7 @@ class PathPlanner:
             self.obstacle_x.append(top_right[0])
             self.obstacle_y.append(i)
 
+
     class Node:
         def __init__(self, x, y, cost, parent_idx):
             self.x = x  # x index in the grid
@@ -72,76 +76,9 @@ class PathPlanner:
 
         def __str__(self):
             return f"{self.x},{self.y},{self.cost},{self.parent_idx}"
-
+    @abstractmethod
     def plan_path(self, start_x, start_y, goal_x, goal_y):
-        """
-        A* pathfinding algorithm
-
-        start_x, start_y: Starting coordinates
-        goal_x, goal_y: Goal coordinates
-
-        Returns the x and y positions of the final path.
-        """
-        startTime = time.time()
-        # Debug statement
-        # print(self.get_xy_index(start_x, self.grid_min_x))
-        start_node = self.Node(self.get_xy_index(start_x, self.grid_min_x),
-                               self.get_xy_index(start_y, self.grid_min_y), 0.0, -1)
-        goal_node = self.Node(self.get_xy_index(goal_x, self.grid_min_x),
-                              self.get_xy_index(goal_y, self.grid_min_y), 0.0, -1)
-
-        open_set, closed_set = dict(), dict()
-        open_set[self.get_node_index(start_node)] = start_node
-
-        lv = 0
-        while True:
-            if (len(open_set) == 0):
-                print("Open set is empty.")
-                raise Exception("No path found")
-
-            current_id = min(open_set, key=lambda o: open_set[o].cost + self.heuristic(goal_node, open_set[o]))
-            current_node = open_set[current_id]
-            show_animation = False
-            if show_animation:  # pragma: no cover
-                plt.plot(self.get_grid_position(current_node.x, self.grid_min_x),
-                         self.get_grid_position(current_node.y, self.grid_min_y), "xc")
-                # for stopping simulation with the esc key.
-                plt.gcf().canvas.mpl_connect('key_release_event',
-                                             lambda event: [exit(
-                                                 0) if event.key == 'escape' else None])
-                if len(closed_set.keys()) % 10 == 0:
-                    plt.pause(0.01)
-
-            if math.hypot(current_node.x - goal_node.x, current_node.y - goal_node.y) <= self.target_radius:
-                goal_node.parent_idx = current_node.parent_idx
-                goal_node.cost = current_node.cost
-                break
-
-            del open_set[current_id]
-            closed_set[current_id] = current_node
-
-            for i, _ in enumerate(self.motion_model):
-                new_node = self.Node(current_node.x + self.motion_model[i][0],
-                                     current_node.y + self.motion_model[i][1],
-                                     current_node.cost + self.motion_model[i][2], current_id)
-                node_id = self.get_node_index(new_node)
-
-                if not self.is_node_valid(new_node):
-                    continue
-
-                if node_id in closed_set:
-                    continue
-
-                if node_id not in open_set:
-                    open_set[node_id] = new_node
-                else:
-                    if open_set[node_id].cost > new_node.cost:
-                        open_set[node_id] = new_node
-
-        path_x, path_y = self.extract_final_path(goal_node, closed_set)
-        endTime = time.time()
-        print("Navigation Time: " + str(endTime-startTime))
-        return path_x[1:], path_y[1:]
+        pass
 
     def extract_final_path(self, goal_node, closed_set):
         path_x, path_y = [self.get_grid_position(goal_node.x, self.grid_min_x)], [
@@ -154,10 +91,6 @@ class PathPlanner:
             parent_idx = node.parent_idx
 
         return path_x, path_y
-
-    @staticmethod
-    def heuristic(node1, node2):
-        return math.hypot(node1.x - node2.x, node1.y - node2.y)
 
     def get_grid_position(self, index, min_position):
         return index * self.grid_resolution + min_position
@@ -172,14 +105,22 @@ class PathPlanner:
         pos_x = self.get_grid_position(node.x, self.grid_min_x)
         pos_y = self.get_grid_position(node.y, self.grid_min_y)
 
+        # Ensure node indices are integers
+        node_x_index = int(node.x)
+        node_y_index = int(node.y)
+
+        # Check if the node is within the grid bounds
         if pos_x < self.grid_min_x or pos_y < self.grid_min_y or pos_x >= self.grid_max_x or pos_y >= self.grid_max_y:
             return False
 
-        if self.obstacle_grid[node.x][node.y]:
+        # Check if the node is within an expanded obstacle
+        if self.obstacle_grid[node_x_index][node_y_index]:
             return False
 
         return True
 
+
+    
     def add_obstacle(self, x, y, size):
         st = time.time()
         self.add_square_obstacle(x, y, size=size)
@@ -187,6 +128,74 @@ class PathPlanner:
         st = time.time()
         self.build_obstacle_grid(self.obstacle_x, self.obstacle_y)
         print("time to build grid " + str(time.time()-st))
+
+    def save_obstacle_grid(self, filename="obstacle_grid.json"):
+        """Saves the obstacle grid and positions to a JSON file."""
+        data = {
+            "obstacle_x": self.obstacle_x,
+            "obstacle_y": self.obstacle_y,
+            "grid_min_x": self.grid_min_x,
+            "grid_min_y": self.grid_min_y,
+            "grid_max_x": self.grid_max_x,
+            "grid_max_y": self.grid_max_y,
+            "grid_width_x": self.grid_width_x,
+            "grid_width_y": self.grid_width_y,
+            "obstacle_grid": self.obstacle_grid
+        }
+        with open(filename, "w") as f:
+            json.dump(data, f)
+        print(f"Obstacle grid saved to {filename}")
+
+    def load_obstacle_grid(self, filename="obstacle_grid.json"):
+        """Loads the obstacle grid and positions from a JSON file."""
+        with open(filename, "r") as f:
+            data = json.load(f)
+            self.obstacle_x = data["obstacle_x"]
+            self.obstacle_y = data["obstacle_y"]
+            self.grid_min_x = data["grid_min_x"]
+            self.grid_min_y = data["grid_min_y"]
+            self.grid_max_x = data["grid_max_x"]
+            self.grid_max_y = data["grid_max_y"]
+            self.grid_width_x = data["grid_width_x"]
+            self.grid_width_y = data["grid_width_y"]
+            self.obstacle_grid = data["obstacle_grid"]
+        print(f"Obstacle grid loaded from {filename}")
+
+    def add_obstacles(self, fruit_positions, aruco_positions, obstacle_size=0.1, grid_file="obstacle_grid.json"):
+        """
+        Adds obstacles to the planner's obstacle list from fruit positions and ArUco marker positions.
+        If an obstacle grid is saved, it loads the grid from the file. Otherwise, it generates the grid.
+        
+        fruit_positions: List of fruit obstacle positions
+        aruco_positions: List of ArUco marker positions
+        obstacle_size: Size of each obstacle (square)
+        """
+        # try:
+        #     # Try to load the obstacle grid from file
+        #     self.load_obstacle_grid(grid_file)
+        #     print("Loaded obstacle grid from file.")
+        # except FileNotFoundError:
+        #     # If the file is not found, generate the obstacle grid and save it
+        #     print("Obstacle grid file not found, generating obstacles...")
+        #     # Add fruit obstacles
+        #     for fruit in fruit_positions:
+        #         self.add_obstacle(fruit[0], fruit[1], obstacle_size)
+
+        #     # Add ArUco marker obstacles
+        #     for ox, oy in zip(aruco_positions[:, 0], aruco_positions[:, 1]):
+        #         self.add_obstacle(ox, oy, obstacle_size)
+
+        #     # Save the generated obstacle grid to file
+        #     self.save_obstacle_grid(grid_file)
+        # Add fruit obstacles
+        for fruit in fruit_positions:
+            self.add_obstacle(fruit[0], fruit[1], obstacle_size)
+
+        # Add ArUco marker obstacles
+        for ox, oy in zip(aruco_positions[:, 0], aruco_positions[:, 1]):
+            self.add_obstacle(ox, oy, obstacle_size)
+
+
 
     def update_robot_radius(self, robot_radius):
         self.robot_radius = robot_radius
@@ -197,24 +206,40 @@ class PathPlanner:
         self.build_obstacle_grid(self.obstacle_x, self.obstacle_y)
 
     def build_obstacle_grid(self, ox, oy):
+        # Create the obstacle grid using NumPy arrays
         self.grid_min_x = round(min(ox))
         self.grid_min_y = round(min(oy))
         self.grid_max_x = round(max(ox))
         self.grid_max_y = round(max(oy))
 
-        self.grid_width_x = round((self.grid_max_x - self.grid_min_x) / self.grid_resolution)
-        self.grid_width_y = round((self.grid_max_y - self.grid_min_y) / self.grid_resolution)
+        # Define grid dimensions
+        self.grid_width_x = int((self.grid_max_x - self.grid_min_x) / self.grid_resolution)
+        self.grid_width_y = int((self.grid_max_y - self.grid_min_y) / self.grid_resolution)
 
-        self.obstacle_grid = [[False for _ in range(self.grid_width_y)]
-                              for _ in range(self.grid_width_x)]
-        for ix in range(self.grid_width_x):
-            x = self.get_grid_position(ix, self.grid_min_x)
-            for iy in range(self.grid_width_y):
-                y = self.get_grid_position(iy, self.grid_min_y)
-                for obs_x, obs_y in zip(ox, oy):
-                    if math.hypot(obs_x - x, obs_y - y) <= self.robot_radius:
+        # Initialize obstacle grid with False
+        self.obstacle_grid = np.zeros((self.grid_width_x, self.grid_width_y), dtype=bool)
+
+        # Get the range of cells affected by each obstacle
+        for obs_x, obs_y in zip(ox, oy):
+            obs_ix = self.get_xy_index(obs_x, self.grid_min_x)
+            obs_iy = self.get_xy_index(obs_y, self.grid_min_y)
+
+            # Calculate the radius in grid cells, considering both robot radius and obstacle size
+            radius = int((self.robot_radius + self.obstacle_size / 2) / self.grid_resolution)
+
+            # Define the range of cells to be affected by this obstacle
+            min_ix = max(0, obs_ix - radius)
+            max_ix = min(self.grid_width_x - 1, obs_ix + radius)
+            min_iy = max(0, obs_iy - radius)
+            max_iy = min(self.grid_width_y - 1, obs_iy + radius)
+
+            # Mark the cells within the radius as obstacles
+            for ix in range(min_ix, max_ix + 1):
+                for iy in range(min_iy, max_iy + 1):
+                    if math.hypot(self.get_grid_position(ix, self.grid_min_x) - obs_x,
+                                self.get_grid_position(iy, self.grid_min_y) - obs_y) <= self.robot_radius + (self.obstacle_size / 2):
                         self.obstacle_grid[ix][iy] = True
-                        break
+
 
     def create_walls(self, min_x, min_y, max_x, max_y, resolution):
         for i in np.arange(min_x, max_x, resolution):
@@ -230,71 +255,70 @@ class PathPlanner:
             self.obstacle_x.append(min_x)
             self.obstacle_y.append(i)
 
-    @staticmethod
-    def define_motion_model():
-        return [[1, 0, 1], [0, 1, 1], [-1, 0, 1], [0, -1, 1],
-                [-1, -1, math.sqrt(2)], [-1, 1, math.sqrt(2)],
-                [1, -1, math.sqrt(2)], [1, 1, math.sqrt(2)]]
-
     def reset_obstacles(self):
         self.obstacle_x = []
         self.obstacle_y = []
-        self.create_walls(-1.5, -1.5, 1.5, 1.5, 0.01)
+        self.create_walls(-1.6, -1.6, 1.6, 1.6, 0.01)
         
     @staticmethod
     def compute_goal_positions(fruit_list, fruit_positions, search_list):
         return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
 
-    def find_turning_points(self, path_x, path_y, threshold_angle=10):
+
+    ###################################################################
+    @abstractmethod
+    def heuristic(node1, node2):
+        pass
+
+    @abstractmethod
+    def define_motion_model(self):
+        """Abstract method for defining the motion model. Must be implemented by the subclass."""
+        pass
+
+    @abstractmethod
+    def plan_path_based_mode(self, start_x, start_y, goal_x, goal_y):
+        pass
+    
+
+    def are_points_collinear(self, x1, y1, x2, y2, x3, y3):
+        """
+        Check if three points are collinear (i.e., they lie on a straight line).
+        """
+        # Using the slope formula to check if the points are aligned
+        # (y2 - y1) / (x2 - x1) should be equal to (y3 - y2) / (x3 - x2)
+        # This avoids division by zero, and we just cross-multiply to check for collinearity
+        return abs((y2 - y1) * (x3 - x2) - (y3 - y2) * (x2 - x1)) < 1e-6
         
-        turning_points_x = [path_x[0]]
-        turning_points_y = [path_y[0]]
+    def plot_obstacle_grid(self):
+        """
+        Plot the obstacle grid for visualization purposes without the black part.
+        Only the obstacles are displayed using scatter.
+        """
+        if self.obstacle_grid is None:
+            print("No obstacle grid to plot.")
+            return
 
-        for i in range(1, len(path_x) - 1):
-            x1, y1 = path_x[i - 1], path_y[i - 1]
-            x2, y2 = path_x[i], path_y[i]
-            x3, y3 = path_x[i + 1], path_y[i + 1]
+        # Create a figure and axis for plotting
+        plt.figure(figsize=(8, 8))
 
-            angle1 = math.atan2(y2 - y1, x2 - x1)
-            angle2 = math.atan2(y3 - y2, x3 - x2)
+        # Overlay the obstacle points using scatter
+        plt.scatter(self.obstacle_x, self.obstacle_y, color='red', s=10, label="Obstacles")  # s controls the size of the scatter points
 
-            angle_diff = abs(angle1 - angle2) * 180 / math.pi
+        # Add grid lines
+        plt.grid(True)
+        plt.title("Obstacle Grid")
+        plt.xlabel("X-axis")
+        plt.ylabel("Y-axis")
+        plt.axis("equal")
+        plt.gca().set_xticks(np.arange(-1.6, 1.6, 0.4))
+        plt.gca().set_yticks(np.arange(-1.6, 1.6, 0.4))
+        plt.xlim(-1.6, 1.6)
+        plt.ylim(-1.6, 1.6)
 
-            # Debugging prints
-            print(f"Point {i}: ({x2}, {y2})")
-            print(f"Angle1: {angle1}, Angle2: {angle2}, Angle Difference: {angle_diff}")
+        # Show the plot
+        plt.legend()
+        plt.show()
 
-            if angle_diff > threshold_angle:
-                turning_points_x.append(x2)
-                turning_points_y.append(y2)
-
-        turning_points_x.append(path_x[-1])
-        turning_points_y.append(path_y[-1])
-
-        return turning_points_x, turning_points_y
-    
-    def export_obstacle_grid(self, filename="obstacle_grid.txt"):
-        with open(filename, 'w') as f:
-            f.write(f"{self.grid_min_x},{self.grid_min_y},{self.grid_max_x},{self.grid_max_y}\n")
-            f.write(f"{self.grid_width_x},{self.grid_width_y}\n")
-            for row in self.obstacle_grid:
-                f.write(','.join(map(str, row)) + '\n')
-    
-    # Besides importing obstacle_grid
-    # also instantiate mapReader, and get fruit & fruit_location & aruco_location
-    # use add_square_obstacles to add things inside
-    def import_obstacle_grid(self, filename="obstacle_grid.txt"):
-        with open(filename, 'r') as f:
-            # Read grid bounds and dimensions
-            self.grid_min_x, self.grid_min_y, self.grid_max_x, self.grid_max_y = map(int, f.readline().split(','))
-            self.grid_width_x, self.grid_width_y = map(int, f.readline().split(','))
-            
-            # Initialize the obstacle grid
-            self.obstacle_grid = []
-            for line in f:
-                row = list(map(lambda x: x == 'True', line.strip().split(',')))
-                self.obstacle_grid.append(row)
-    
 class MathTools():
     @staticmethod
     def find_turning_angle(waypoint, robot_pose):
@@ -304,9 +328,9 @@ class MathTools():
         theta_r = robot_pose[2]                         # angle of robot from origin
         theta_w = np.arctan2(dy, dx)                    # angle of waypoint from robot
         theta_turn = theta_w - theta_r                  # angle to be turned by robot
-        theta_turn = (theta_turn + np.pi) % (2 * np.pi) - np.pi  # normalize angle to [-pi, pi], make sure it always turns the smallest angle
+        theta_turn = MathTools.clamp_angle(theta_turn) # normalize angle to [-pi, pi], make sure it always turns the smallest angle
         theta_deg = float(theta_turn * 180 / np.pi)
-        print(f"Angle calculated: {theta_w} - {theta_r} = {theta_turn}")
+        print(f"Angle calculated: {MathTools.deg(theta_w)} - {MathTools.deg(theta_r)} = {theta_deg}")
         return theta_deg
     
     @staticmethod
@@ -382,4 +406,3 @@ class MapReader:
     
     def compute_goal_positions(self, fruit_list, fruit_positions, search_list):
         return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
-    

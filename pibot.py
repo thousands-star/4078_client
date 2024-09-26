@@ -11,10 +11,16 @@ class PibotControl:
         self.wheel_vel = [0, 0]
         # We designed a new mode, 0 for manual, 1 for auto
         self.mode = 0
+        self.set_mode(0)
+        self.set_pid(1,1.5,0.25,0.1)
+        self.set_radius(0.055)
         
     def set_pid(self, use_pid, kp, ki, kd):
         requests.get(f"http://{self.ip}:{self.port}/pid?use_pid="+str(use_pid)+"&kp="+str(kp)+"&ki="+str(ki)+"&kd="+str(kd))
 
+    def set_radius(self, radius):
+        requests.get(f"http://{self.ip}:{self.port}/radius?radius="+str(radius))
+        return radius
     # Change the robot speed here
     # The value should be between -1 and 1.
     # Note that this is just a number specifying how fast the robot should go, not the actual speed in m/s
@@ -31,8 +37,7 @@ class PibotControl:
     # This function would convert m into optical sensor counting
     def set_displacement(self, displacement):
         if(self.mode == 1):
-            unit_disp = round(displacement / 0.00534)
-            resp = requests.get(f"http://{self.ip}:{self.port}/disp?left_disp="+str(unit_disp)+"&right_disp="+str(unit_disp))
+            resp = requests.get(f"http://{self.ip}:{self.port}/disp?lin_disp="+str(displacement)+"&ang_disp="+str(0))
         return displacement
     
     # Turning around
@@ -40,14 +45,7 @@ class PibotControl:
     # The convention is anticlockwise -> positive angle, clockwise -> negative angle
     def set_angle_deg(self, theta):
         if(self.mode == 1):
-            radius = 0.06 # radius = baseline/2, in measurement, baseline is 15cm, which is 0.15m.
-            unit_disp = (theta / 180 * np.pi * radius) / 0.00534
-            
-            # We are trying to make it turn, so we have to make different sign on each.
-            # Since clockwise is positive angle
-            # When clockwise, right have to go in front, left have to go backward.
-            resp = requests.get(f"http://{self.ip}:{self.port}/disp?left_disp="+str(-unit_disp)+"&right_disp="+str(unit_disp))
-    
+            resp = requests.get(f"http://{self.ip}:{self.port}/disp?lin_disp="+str(0)+"&ang_disp="+str(theta))
         return theta
     
     # Change the displacement here
@@ -75,6 +73,9 @@ class PibotControl:
             print("Image retrieval timed out.")
             img = np.zeros((480,640,3), dtype=np.uint8)
         return img
+    
+    def calibrate(self):
+        resp = requests.get(f"http://{self.ip}:{self.port}/calibrate")
         
         
 # This class stores the wheel velocities of the robot, to be used in the EKF.
