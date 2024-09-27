@@ -1,5 +1,4 @@
 import numpy as np
-from args import args
 
 class Fruit_Predictor:
     def __init__(self, camera_matrix_file):
@@ -15,12 +14,15 @@ class Fruit_Predictor:
             'capsicum': [0.073, 0.073, 0.088],  # Capsicum
         }
     
-    def get_fruit_positions_relative_to_camera(self, img_predictions):
+    
+    def get_fruit_positions_relative_to_camera(self, img_predictions, fruit=None):
         """
         Estimate the positions of multiple fruits relative to the camera based on their bounding boxes and actual sizes.
+        If the 'fruit' argument is provided, only the positions for that fruit type will be returned.
 
         Args:
             img_predictions (list): A list of predictions where each prediction is [class_id, x_center, y_center, width, height].
+            fruit (str, optional): The name of the fruit to filter the results (e.g., 'redapple', 'orange').
 
         Returns:
             list: A list of tuples containing the estimated positions of the fruits relative to the camera (class_id, X, Z) in meters.
@@ -37,6 +39,10 @@ class Fruit_Predictor:
         for img_prediction in img_predictions:
             # Get the fruit type based on the detected class
             fruit_type = fruit_list[img_prediction[0] - 1]
+            
+            # If a specific fruit is defined and this fruit doesn't match, skip this iteration
+            if fruit and fruit_type != fruit:
+                continue
             
             # Extract actual size of the fruit (use height for distance estimation)
             fruit_actual_size = self.object_dimensions[fruit_type][2]  # Use height in meters
@@ -57,6 +63,7 @@ class Fruit_Predictor:
             estimated_positions.append((fruit_type, estimated_position_x, estimated_distance_z))
 
         return estimated_positions
+
 
     
     @staticmethod

@@ -53,8 +53,8 @@ class Command_Controller:
     def get_new_state(self, drive_meas, period = 20):
         self.img = self.control.get_image()
         measurements, self.aruco_img = self.aruco_sensor.detect_marker_positions(self.img)
-        # Drop camera model when it detected less than 2 marker
-        if(len(measurements) < 2):
+        # Drop camera model when it detected less than 3 marker
+        if(len(measurements) < 3):
             measurements = []
         # # Computer Vision
         # # Perform YOLO detection using the YOLODetector
@@ -74,7 +74,7 @@ class Command_Controller:
         for i in range(period-1):
             self.img = self.control.get_image()
             measurements, self.aruco_img = self.aruco_sensor.detect_marker_positions(self.img)
-            # Drop camera model when it detected less than 2 marker
+            # Drop camera model when it detected less than 3 marker
             if(len(measurements) < 3):
                 measurements = []
             self.ekf.predict(Drive(0,0,0))
@@ -92,7 +92,7 @@ class Command_Controller:
         return robot_state
         
     # A feedback mechanism with ekf and camera model and control it to each waypoint.
-    def navigate(self, waypoint, is_turning_point=False):
+    def navigate(self, waypoint, is_turning_point=False, is_final_turning_point=False):
         robot_state = self.ekf.get_state_vector()
         px = waypoint[0]
         py = waypoint[1]
@@ -107,11 +107,21 @@ class Command_Controller:
         if is_turning_point:
             # Prioritize precise rotation at turning points
             print("\nAt a turning point, rotating precisely...")
+            print(f"Correcting angle at turning point: {theta}")
             while abs(theta) > 3:  # Adjust this threshold for fine rotation control
+                if theta > 90:
+                    theta = 90
+                elif theta < -90:
+                    theta = -90
                 # Rotate to correct the angle
+                print(f"Turning {theta} angle")
                 self.control.set_angle_deg(theta)
-                self.ekf.set_var = [0.15, 0.01]
+                self.ekf.set_var = [0.1, 0.01]
                 radius = 0.06
+                # fixed distance
+                # speed = 0.95
+                # dt = distance / 0.95
+                # vdt = distance
                 disp = abs(mt.rad(theta) * radius)
                 if theta > 0:
                     left_speed = -0.8   # based on the listen_2 turning speed
@@ -123,6 +133,11 @@ class Command_Controller:
                 robot_state = self.get_new_state(drive_meas=drive_meas)
                 theta = mt.find_turning_angle([px, py], robot_state)
                 print(f"Correcting angle at turning point: {theta}")
+        
+        # if is_final_turning_point:
+        #     resp = self.cv_correction([px, py])
+        #     if resp is True:
+        #         print("CV was triggered to correct the final step")
 
         # Continue moving towards the waypoint, without rotation unless it's a turning point
         if dist > 0.05:
@@ -135,6 +150,106 @@ class Command_Controller:
             drive_meas = Drive(left_speed, right_speed, disp / 0.6)
             robot_state = self.get_new_state(drive_meas=drive_meas)
             dist = mt.find_euclidean_distance([px, py], robot_state)
+    
+    def cv_correction(self, waypoint):
+        px = waypoint[0]
+        py = waypoint[1]
+        robot_state = self.ekf.get_state_vector()
+        theta = mt.find_turning_angle(waypoint, robot_state)
+
+        # Get the current image and save it for debugging purposes
+        self.img = self.control.get_image()
+        cv2.imwrite("test.png", self.img)
+
+        # Detect fruits in the image
+        image_preds, _ = self.detector.detect_single_image(self.img)
+        pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+
+                # Variables for limiting search to ±90 degrees
+        max_angle = 90  # Maximum angle to turn (either +90 or -90 degrees)
+        angle_turned = 0  # Track the total angle turned
+        total_angle_turned = 0
+        angle_increment = 30  # Degrees to turn on each attempt
+        direction = 1  # Start by turning right (positive direction)
+
+        
+
+        while len(pos) == 0 and abs(angle_turned) <= max_angle:
+            print(f"No fruit detected, turning the robot by {direction * angle_increment} degrees.")
+
+            # Turn the robot by the current increment in the given direction
+            self.control.set_angle_deg(direction * angle_increment)
+            angle_turned += direction * angle_increment  # Update total angle turned
+            total_angle_turned += angle_increment
+            time.sleep(1)
+
+            # Get a new image after rotating
+            self.img = self.control.get_image()
+            image_preds, _ = self.detector.detect_single_image(self.img)
+            pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+
+            # If the fruit is detected after rotating, break the loop
+            if len(pos) > 0 or total_angle_turned > 360:
+                break
+
+            # If we've reached +90 degrees, switch to turning in the opposite direction
+            if angle_turned >= max_angle:
+                direction = -1  # Switch to turning left
+            elif angle_turned <= -max_angle:
+                direction = 1  # Switch back to turning right
+
+        # If no fruit was detected after all attempts, return False
+        if len(pos) == 0:
+            print("Fruit not detected after maximum attempts, stopping.")
+            return False
+
+        # If fruit is detected, continue with the correction logic
+        pos = pos[0]
+        x_dist = pos[1]
+        z_dist = pos[2]
+        dist = (x_dist ** 2 + z_dist ** 2) ** 0.5
+        angle = np.arctan(x_dist / z_dist) * 180 / np.pi
+
+        # Perform angle correction if the distance is greater than 0.6 meters
+        last_angle_turned = 0  # To store the last turned angle in case we need to recover
+        if dist > 0.6:
+            # Correct the angle as long as the angle is more than 3 degrees
+            while abs(angle) > 7:
+                print(f"CV correcting angle: {angle}")
+                self.control.set_angle_deg(-angle)  # Adjust the robot's angle
+                last_angle_turned = -angle  # Remember the angle turned in this step
+                
+                # Reinitialize pos and timeout for this iteration
+                pos = []
+                timeout = 0
+
+                # Retry fruit detection with a timeout of 3 attempts
+                while len(pos) == 0 and timeout < 3:
+                    self.img = self.control.get_image()  # Get a new image
+                    image_preds, _ = self.detector.detect_single_image(self.img)
+                    pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+
+                    time.sleep(0.5)  # Small delay
+                    timeout += 1
+
+                if len(pos) > 0:
+                    pos = pos[0]
+                    x_dist = pos[1]
+                    z_dist = pos[2]
+                    dist = (x_dist ** 2 + z_dist ** 2) ** 0.5
+                    angle = np.arctan(x_dist / z_dist) * 180 / np.pi
+                else:
+                    # If fruit is lost after turning, recover the last turned angle
+                    print("Failed to detect fruit, recovering the previous angle.")
+                    self.control.set_angle_deg(-last_angle_turned * 0.75)  # Recover the last angle turned
+                    continue
+
+            # Log the corrected robot state
+            print(f"\nCV corrected state: {self.ekf.robot.state[0]},{self.ekf.robot.state[1]},{self.ekf.robot.state[2]}")
+
+        return True
+
+                
 
 
 ## Helper function
@@ -301,7 +416,7 @@ if __name__ == "__main__":
     # Get true aruco pos list
     fruits_list, fruits_true_pos, aruco_true_pos = map_reader.load_map_data()
 
-    path_planner = StraightPathPlanner(grid_resolution=0.1, robot_radius=0.1, target_radius=3.7)
+    path_planner = DiagonalPathPlanner(grid_resolution=0.1, robot_radius=0.15, target_radius=4)
 
     # Load the map and search list
     print(f"Detected fruits: {fruits_list}")
@@ -322,7 +437,7 @@ if __name__ == "__main__":
                                         )
     
     # Process each target's waypoints
-    print("\nAutonomous Driving!")
+    print("\n====================Initializing Path Planner====================\n")
     goal_count = 0
 
     # Open file once in write mode
@@ -354,7 +469,17 @@ if __name__ == "__main__":
             # Navigate through waypoints, check if each waypoint is a turning point
             for px, py in zip(waypoint_x, waypoint_y):
                 is_turning_point = (px, py) in zip(turning_x, turning_y)
-                cmd_controller.navigate([px, py], is_turning_point)
+                
+                # Check if the current waypoint is the final turning point
+                is_final_turning_point = (px, py) == (turning_x[0], turning_y[0])
+
+                if is_final_turning_point:
+                    print(f"Final Point: {px},{py}")
+
+                # Navigate through waypoints
+                cmd_controller.navigate([px, py], is_turning_point, is_final_turning_point)
+                
+                # Check if close enough to the goal and break if so
                 if mt.find_euclidean_distance([goal[0], goal[1]], cmd_controller.get_new_state(drive_meas=Drive(0, 0, 0), period=1)) < 0.3:
                     break
 

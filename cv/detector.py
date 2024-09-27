@@ -198,6 +198,7 @@ class YOLODetector(ObjectDetector):
     def detect_single_image(self, np_img):
         tick = time.time()
         processed_img = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+        # processed_img = np_img
         results = self.model.predict(processed_img)
         dt = time.time() - tick
         print(f'Inference Time {dt:.2f}s, approx {1/dt:.2f}fps', end="\r")
@@ -212,7 +213,11 @@ class YOLODetector(ObjectDetector):
                 classes.append(int(box.cls[0]))
                 formatted_output.append([int(box.cls[0]+1), x1, y1, x2, y2])
         
-        
+        # Output Log to see what is the result
+        print("\n")
+        print(formatted_output)
+        print(type(formatted_output))
+        print("\n")
         # Visualization
         colour_map = self.visualise_output(np_img, bboxes, classes)
         return formatted_output, colour_map
