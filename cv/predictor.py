@@ -121,6 +121,56 @@ class Fruit_Predictor:
             # Return the positions of all fruits
             return {key: [estimation.get() for estimation in value] for key, value in self.object_prediction.items()}
 
+    def predict(self, robot_pose, img_prediction):
+        """
+        Estimate the positions of multiple fruits, use the relative position, add to the r
+
+        Args:
+            robot_pose (tuple / list): Storing robot x, robot y, robot theta
+            img_predictions (list): A list of predictions where each prediction is [class_id, x_center, y_center, width, height].
+
+        Returns:
+            list: A list of tuples containing the estimated positions of the fruits relative to the camera (class_id, X, Z) in meters.
+        """
+        relative_positions = self.get_fruit_positions_relative_to_camera(img_predictions=img_prediction)
+
+        for fruit_type, relative_x, relative_z in relative_positions:
+            if self.update_flag[fruit_type] is True:
+                self.append_estimation(fruit_type=fruit_type, new_estimation=Estimation(robot_pose=robot_pose, relative_pos=[relative_x,relative_z]))
+                self.object_prediction[fruit_type][0] = Estimation(estimation_list=self.object_prediction[fruit_type][1])
+    
+    def append_estimation(self, fruit_type, new_estimation):
+         
+        estimation_list = self.object_prediction[fruit_type][1]
+        if len(estimation_list) < 20:
+            # If the list is empty, simply append the new estimation
+            estimation_list.append(new_estimation)
+            self.object_prediction[fruit_type][1] = new_estimation
+            return True
+        
+        # Find the estimation with the lowest ci
+        min_index = 0
+        min_ci = estimation_list[0].ci
+
+        for i, estimation in enumerate(estimation_list):
+            if estimation.ci < min_ci:
+                min_ci = estimation.ci
+                min_index = i
+
+        # Compare the new estimation's ci with the lowest one
+        if new_estimation.ci > min_ci:
+            # Replace the lowest ci estimation with the new one
+            estimation_list.pop(min_index)
+            estimation_list.append(new_estimation)
+            self.object_prediction[fruit_type][1] = new_estimation
+            return True  # Return True to indicate a replacement was made
+        
+        return False  # Return False to indicate no replacement was made
+
+        
+    
+
+
     @staticmethod
     def extract_bounding_box(img_prediction):
         # Assuming YOLO format [class_id, x_min, y_min, x_max, y_max]
@@ -135,6 +185,7 @@ class Fruit_Predictor:
         return x_center, y_center, width, height
     
 
+
 class Estimation:
     """
     Estimation class that has three attributes:
@@ -142,10 +193,10 @@ class Estimation:
     - py: estimated y position
     - ci: confidence interval
     """
-    def __init__(self, robot_pose=None, img_predictions=None, estimation_list=None, true_pos=None):
+    def __init__(self, robot_pose=None, relative_pos=None, estimation_list=None, true_pos=None):
         """
         Constructor for Estimation class. It allows three types of initialization:
-        1. If robot_pose and img_predictions are provided, it will call _predict to compute the prediction.
+        1. If robot_pose and relative_pos are provided, it will call _predict to compute the prediction.
         2. If estimation_list is provided, it will call _merge_estimations to merge the estimations.
         3. If true_position is provided, it will just assign truepos to px, py, ci
         """
@@ -157,14 +208,14 @@ class Estimation:
             self.px, self.py, self.ci = self._merge_estimations(estimation_list)
         
         # If robot_pose and img_predictions are provided, call _predict
-        elif robot_pose is not None and img_predictions is not None:
-            self.px, self.py, self.ci = self._predict(robot_pose, img_predictions)
+        elif robot_pose is not None and relative_pos is not None:
+            self.px, self.py, self.ci = self._predict(robot_pose, relative_pos)
         
         # Otherwise, raise an error for missing arguments
         else:
             raise ValueError("Either provide estimation_list, true_pos, or both robot_pose and img_predictions")
 
-    def _predict(self, robot_pose, img_predictions):
+    def _predict(self, robot_pose, relative_pos):
         # Example prediction logic (replace with actual logic)
         return 0.0, 0.0, 1.0  # Example return values
     

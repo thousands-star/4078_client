@@ -216,7 +216,6 @@ class YOLODetector(ObjectDetector):
         # Output Log to see what is the result
         print("\n")
         print(formatted_output)
-        print(type(formatted_output))
         print("\n")
         # Visualization
         colour_map = self.visualise_output(np_img, bboxes, classes)
