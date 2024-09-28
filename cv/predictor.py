@@ -15,14 +15,13 @@ class Fruit_Predictor:
         }
 
         # This is the prediction of the object.
-        # The datatypes would be: list of list
-        # 'redapple' : [ [Merged estimations] , [list of estimations] ]
+        # 'redapple' : [Merged estimation, list of estimations]
         self.object_prediction = {
-            'redapple': [],
-            'greenapple': [],
-            'orange': [],
-            'mango': [],
-            'capsicum': [],
+            'redapple': [None, []],
+            'greenapple': [None, []],
+            'orange': [None, []],
+            'mango': [None, []],
+            'capsicum': [None, []],
         }
 
         # This is the update flag / known flag for the object
@@ -102,8 +101,8 @@ class Fruit_Predictor:
     def get_position(self, fruit=None):
         """
         Get the current estimated positions of the fruits.
-        If a specific fruit is provided, return the position of that fruit.
-        Otherwise, return the positions of all fruits.
+        If a specific fruit is provided, return the merged position of that fruit.
+        Otherwise, return the merged positions of all fruits.
 
         Args:
             fruit (str, optional): The name of the fruit to filter the results (e.g., 'redapple', 'orange').
@@ -113,13 +112,17 @@ class Fruit_Predictor:
         """
         if fruit:
             # Return the position of the specified fruit
-            if fruit in self.object_prediction:
-                return {fruit: [estimation.get() for estimation in self.object_prediction[fruit]]}
+            if fruit in self.object_prediction and self.object_prediction[fruit][0] is not None:
+                # Return the merged estimation for the specified fruit
+                return {fruit: self.object_prediction[fruit][0].get()}
             else:
                 return {}
         else:
-            # Return the positions of all fruits
-            return {key: [estimation.get() for estimation in value] for key, value in self.object_prediction.items()}
+            # Return the merged positions of all fruits
+            return {
+                key: value[0].get() if value[0] is not None else None 
+                for key, value in self.object_prediction.items()
+            }
 
     def predict(self, robot_pose, img_prediction):
         """
@@ -140,7 +143,6 @@ class Fruit_Predictor:
                 self.object_prediction[fruit_type][0] = Estimation(estimation_list=self.object_prediction[fruit_type][1])
     
     def append_estimation(self, fruit_type, new_estimation):
-         
         estimation_list = self.object_prediction[fruit_type][1]
         if len(estimation_list) < 20:
             # If the list is empty, simply append the new estimation
@@ -166,9 +168,6 @@ class Fruit_Predictor:
             return True  # Return True to indicate a replacement was made
         
         return False  # Return False to indicate no replacement was made
-
-        
-    
 
 
     @staticmethod
