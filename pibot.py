@@ -12,8 +12,8 @@ class PibotControl:
         # We designed a new mode, 0 for manual, 1 for auto
         self.mode = 0
         self.set_mode(0)
-        self.set_pid(1,1.5,0.25,0.1)
-        self.set_radius(0.055)
+        self.set_pid(1,1.5,0.5,0.1)
+        self.set_radius(0.05)
         
     def set_pid(self, use_pid, kp, ki, kd):
         requests.get(f"http://{self.ip}:{self.port}/pid?use_pid="+str(use_pid)+"&kp="+str(kp)+"&ki="+str(ki)+"&kd="+str(kd))

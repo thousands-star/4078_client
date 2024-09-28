@@ -13,7 +13,28 @@ class Fruit_Predictor:
             'mango': [0.113, 0.067, 0.055],  # Mango
             'capsicum': [0.073, 0.073, 0.088],  # Capsicum
         }
-    
+
+        # This is the prediction of the object.
+        # The datatypes would be: list of list
+        # 'redapple' : [ [Merged estimations] , [list of estimations] ]
+        self.object_prediction = {
+            'redapple': [],
+            'greenapple': [],
+            'orange': [],
+            'mango': [],
+            'capsicum': [],
+        }
+
+        # This is the update flag / known flag for the object
+        # If true position is given, it will be toggled to False, and stop updating its position.
+        # Else, it would be True, and allow the predictor to update its position.
+        self.update_flag = {
+            'redapple': True,
+            'greenapple': True,
+            'orange': True,
+            'mango': True,
+            'capsicum': True,
+        }
     
     def get_fruit_positions_relative_to_camera(self, img_predictions, fruit=None):
         """
@@ -64,8 +85,42 @@ class Fruit_Predictor:
 
         return estimated_positions
 
+    def set_ground_truth(self, fruit_list, fruit_pos):
+        if fruit_list is None or fruit_pos is None:
+            return
+        
+        # Iterate over provided fruits and their positions
+        for idx, fruit in enumerate(fruit_list):
+            if fruit in self.object_prediction:
+                # Since ground truth exists, disable updates for this fruit
+                self.update_flag[fruit] = False
+                
+                # Update prediction with provided ground truth position
+                true_position = fruit_pos[idx]
+                self.object_prediction[fruit] = [Estimation(true_pos=true_position)]  # Merged Estimation
 
-    
+    def get_position(self, fruit=None):
+        """
+        Get the current estimated positions of the fruits.
+        If a specific fruit is provided, return the position of that fruit.
+        Otherwise, return the positions of all fruits.
+
+        Args:
+            fruit (str, optional): The name of the fruit to filter the results (e.g., 'redapple', 'orange').
+
+        Returns:
+            dict: A dictionary with fruit names as keys and their positions as values.
+        """
+        if fruit:
+            # Return the position of the specified fruit
+            if fruit in self.object_prediction:
+                return {fruit: [estimation.get() for estimation in self.object_prediction[fruit]]}
+            else:
+                return {}
+        else:
+            # Return the positions of all fruits
+            return {key: [estimation.get() for estimation in value] for key, value in self.object_prediction.items()}
+
     @staticmethod
     def extract_bounding_box(img_prediction):
         # Assuming YOLO format [class_id, x_min, y_min, x_max, y_max]
@@ -79,3 +134,69 @@ class Fruit_Predictor:
 
         return x_center, y_center, width, height
     
+
+class Estimation:
+    """
+    Estimation class that has three attributes:
+    - px: estimated x position
+    - py: estimated y position
+    - ci: confidence interval
+    """
+    def __init__(self, robot_pose=None, img_predictions=None, estimation_list=None, true_pos=None):
+        """
+        Constructor for Estimation class. It allows three types of initialization:
+        1. If robot_pose and img_predictions are provided, it will call _predict to compute the prediction.
+        2. If estimation_list is provided, it will call _merge_estimations to merge the estimations.
+        3. If true_position is provided, it will just assign truepos to px, py, ci
+        """
+        # If true position is provided, set px, py, ci directly
+        if true_pos is not None:
+            self.px, self.py, self.ci = true_pos[0], true_pos[1], 1
+        # If estimation_list is provided, call _merge_estimations
+        elif estimation_list is not None:
+            self.px, self.py, self.ci = self._merge_estimations(estimation_list)
+        
+        # If robot_pose and img_predictions are provided, call _predict
+        elif robot_pose is not None and img_predictions is not None:
+            self.px, self.py, self.ci = self._predict(robot_pose, img_predictions)
+        
+        # Otherwise, raise an error for missing arguments
+        else:
+            raise ValueError("Either provide estimation_list, true_pos, or both robot_pose and img_predictions")
+
+    def _predict(self, robot_pose, img_predictions):
+        # Example prediction logic (replace with actual logic)
+        return 0.0, 0.0, 1.0  # Example return values
+    
+    def _merge_estimations(self, estimation_list):
+        # Example merge logic for merging multiple estimations
+        if not estimation_list:
+            return 0.0, 0.0, 1.0
+
+        total_weight = 0
+        weighted_sum_x = 0
+        weighted_sum_y = 0
+        
+        for estimation in estimation_list:
+            x, y, confidence = estimation
+            weighted_sum_x += x * confidence
+            weighted_sum_y += y * confidence
+            total_weight += confidence
+        
+        if total_weight == 0:
+            return 0.0, 0.0, 1.0
+        
+        merged_x = weighted_sum_x / total_weight
+        merged_y = weighted_sum_y / total_weight
+        merged_confidence = total_weight / len(estimation_list)
+
+        return merged_x, merged_y, merged_confidence
+
+    def get(self):
+        """
+        Get the current estimation values.
+        
+        Returns:
+            tuple: (px, py, ci) The estimated x, y positions and confidence interval.
+        """
+        return self.px, self.py, self.ci
