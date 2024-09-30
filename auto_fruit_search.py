@@ -56,17 +56,11 @@ class Command_Controller:
         # Drop camera model when it detected less than 3 marker
         if(len(measurements) < 3):
             measurements = []
-        # # Computer Vision
-        # # Perform YOLO detection using the YOLODetector
-        # formatted_output, _ = self.detector.detect_single_image(self.img)
-        # for prediction in formatted_output:
-        #     fruit_type, x_center, y_center, width, height = prediction
-        #     position = self.get_fruit_position_relative_to_camera(prediction)
-        #     print(f"Detected {fruit_type} at camera position {position}")
 
         self.ekf.predict(drive_meas)    # predict ekf
         self.ekf.add_landmarks(measurements)    # add landmarks detected to ekf
         self.ekf.update(measurements)   # update ekf based on landmarks (Correct the predict state)
+        
         robot_state = self.ekf.get_state_vector()   # get the current state vector
         robot_state[2] = mt.clamp_angle(robot_state[2])
         print(f"Robot State: {robot_state[0]},{robot_state[1]},{mt.deg(robot_state[2])}")
@@ -104,6 +98,7 @@ class Command_Controller:
         dist = mt.find_euclidean_distance([px, py], robot_state)
         print(f"Distance: {dist}, Angle: {theta}")
 
+        # Motion Model turning
         if is_turning_point:
             # Prioritize precise rotation at turning points
             print("\nAt a turning point, rotating precisely...")
@@ -113,15 +108,12 @@ class Command_Controller:
                     theta = 90
                 elif theta < -90:
                     theta = -90
+                time.sleep(1)
                 # Rotate to correct the angle
                 print(f"Turning {theta} angle")
                 self.control.set_angle_deg(theta)
                 self.ekf.set_var = [0.1, 0.01]
                 radius = 0.06
-                # fixed distance
-                # speed = 0.95
-                # dt = distance / 0.95
-                # vdt = distance
                 disp = abs(mt.rad(theta) * radius)
                 if theta > 0:
                     left_speed = -0.8   # based on the listen_2 turning speed
@@ -134,10 +126,80 @@ class Command_Controller:
                 theta = mt.find_turning_angle([px, py], robot_state)
                 print(f"Correcting angle at turning point: {theta}")
         
-        # if is_final_turning_point:
-        #     resp = self.cv_correction([px, py])
-        #     if resp is True:
-        #         print("CV was triggered to correct the final step")
+        # CV correcting angle and distance.
+        if is_final_turning_point:
+            resp = self.cv_correction()
+            if resp is True:
+                print("CV was triggered to correct the final step")
+                # Get the updated robot state and fruit position
+                robot_state = self.ekf.get_state_vector()
+                self.img = self.control.get_image()  # Get a new image
+                cv2.imwrite("forward_first.png", self.img)
+                image_preds, _ = self.detector.detect_single_image(self.img)
+                fruit_pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+
+                if fruit_pos:
+                    # Calculate the distance between robot and fruit
+                    x_dist, z_dist = fruit_pos[0][1], fruit_pos[0][2]
+                    dist_to_fruit = (x_dist ** 2 + z_dist ** 2) ** 0.5
+                    
+                    print(f"Distance to fruit: {dist_to_fruit} meters")
+                    prev_measurement = dist_to_fruit
+                    
+                    # Move towards the fruit until within 0.05m distance
+                    while dist_to_fruit > 0.30 and dist_to_fruit <= prev_measurement:
+                        prev_measurement = dist_to_fruit
+                        angle = np.arctan(x_dist / z_dist) * 180 / np.pi
+                        self.control.set_angle_deg(-angle)
+                        print(f"Turning {angle:.2f} towards the fruit.")
+                        dis_step = min(0.2, dist_to_fruit)  # Ensure the step size is 0.01 or the remaining distance
+                        print(f"Moving {dis_step:.2f} towards the fruit. Current distance: {dist_to_fruit:.2f}m")
+                        
+
+                        left_speed = right_speed = 0.6
+                        self.control.set_displacement(dis_step)
+                        drive_meas = Drive(left_speed, right_speed, dis_step / 0.6)
+
+                        # Update robot state and recalculate distance
+                        robot_state = self.get_new_state(drive_meas=drive_meas)
+                        self.img = self.control.get_image()  # Get a new image for fruit detection
+                        cv2.imwrite("forwarding.png", self.img)
+                        image_preds, _ = self.detector.detect_single_image(self.img)
+                        fruit_pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+                        
+                        if fruit_pos:
+                            x_dist, z_dist = fruit_pos[0][1], fruit_pos[0][2]
+                            dist_to_fruit = (x_dist ** 2 + z_dist ** 2) ** 0.5  # Recalculate distance to the fruit
+                        else:
+                            print("Lost sight of the fruit. Trying to get more images.")
+                            retry_attempts = 7  # Number of retry attempts to get the fruit's position
+                            for attempt in range(retry_attempts):
+                                time.sleep(0.5)  # Small delay before trying again
+                                self.img = self.control.get_image()  # Capture a new image
+                                image_preds, _ = self.detector.detect_single_image(self.img)
+                                fruit_pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
+
+                                if fruit_pos:
+                                    x_dist, z_dist = fruit_pos[0][1], fruit_pos[0][2]
+                                    dist_to_fruit = (x_dist ** 2 + z_dist ** 2) ** 0.5  # Recalculate distance to the fruit
+                                    print(f"Found the fruit after retry. Current distance: {dist_to_fruit:.2f}m")
+                                    break  # Exit retry loop once fruit is found
+                                else:
+                                    print(f"Attempt {attempt + 1} failed to detect the fruit.")
+                            if not fruit_pos:
+                                print("Failed to detect the fruit after retries. do cv correcting again.")
+                                # This one we have to go straight for the remaining distance
+                                if prev_measurement > 0.5:
+                                    print("Auto going for the rest of previous residues")
+                                    dis = prev_measurement - 0.3
+                                    self.control.set_displacement(dis)
+                                    drive_meas = Drive(left_speed, right_speed, dis / 0.6)
+                                    self.get_new_state(drive_meas=drive_meas, period = 1)
+                                break
+                    print("Arrived within 0.05m of the fruit. Stopping.")
+                    return  # Exit the function after reaching the fruit
+            else:
+                print("CV correction failed. Continuing with regular navigation.")
 
         # Continue moving towards the waypoint, without rotation unless it's a turning point
         if dist > 0.05:
@@ -151,28 +213,21 @@ class Command_Controller:
             robot_state = self.get_new_state(drive_meas=drive_meas)
             dist = mt.find_euclidean_distance([px, py], robot_state)
     
-    def cv_correction(self, waypoint):
-        px = waypoint[0]
-        py = waypoint[1]
-        robot_state = self.ekf.get_state_vector()
-        theta = mt.find_turning_angle(waypoint, robot_state)
-
+    def cv_correction(self):
         # Get the current image and save it for debugging purposes
         self.img = self.control.get_image()
-        cv2.imwrite("test.png", self.img)
+        cv2.imwrite("first_capture.png", self.img)
 
         # Detect fruits in the image
         image_preds, _ = self.detector.detect_single_image(self.img)
         pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
 
                 # Variables for limiting search to ±90 degrees
-        max_angle = 90  # Maximum angle to turn (either +90 or -90 degrees)
+        max_angle = 60  # Maximum angle to turn (either +90 or -90 degrees)
         angle_turned = 0  # Track the total angle turned
         total_angle_turned = 0
         angle_increment = 30  # Degrees to turn on each attempt
         direction = 1  # Start by turning right (positive direction)
-
-        
 
         while len(pos) == 0 and abs(angle_turned) <= max_angle:
             print(f"No fruit detected, turning the robot by {direction * angle_increment} degrees.")
@@ -189,7 +244,7 @@ class Command_Controller:
             pos = self.predictor.get_fruit_positions_relative_to_camera(image_preds, fruit=self.current_goal)
 
             # If the fruit is detected after rotating, break the loop
-            if len(pos) > 0 or total_angle_turned > 360:
+            if len(pos) > 0 or total_angle_turned > 240:
                 break
 
             # If we've reached +90 degrees, switch to turning in the opposite direction
@@ -212,11 +267,13 @@ class Command_Controller:
 
         # Perform angle correction if the distance is greater than 0.6 meters
         last_angle_turned = 0  # To store the last turned angle in case we need to recover
-        if dist > 0.6:
-            # Correct the angle as long as the angle is more than 3 degrees
+        timeout = 0
+        if dist > 0.5:
+            # Correct the angle as long as the angle is more than 7 degrees
             while abs(angle) > 7:
                 print(f"CV correcting angle: {angle}")
                 self.control.set_angle_deg(-angle)  # Adjust the robot's angle
+                time.sleep(0.5)
                 last_angle_turned = -angle  # Remember the angle turned in this step
                 
                 # Reinitialize pos and timeout for this iteration
@@ -241,14 +298,16 @@ class Command_Controller:
                 else:
                     # If fruit is lost after turning, recover the last turned angle
                     print("Failed to detect fruit, recovering the previous angle.")
-                    self.control.set_angle_deg(-last_angle_turned * 0.75)  # Recover the last angle turned
+                    self.control.set_angle_deg(-last_angle_turned)  # Recover the last angle turned
+                    timeout = timeout + 1
                     continue
+
+                if(timeout > 3):
+                    break
 
             # Log the corrected robot state
             print(f"\nCV corrected state: {self.ekf.robot.state[0]},{self.ekf.robot.state[1]},{self.ekf.robot.state[2]}")
-
         return True
-
                 
 
 
@@ -287,6 +346,10 @@ def plot_waypoints_for_goal(path_planner, waypoint_x, waypoint_y, search_target,
     # Highlight start and end points
     plt.scatter(waypoint_x[0], waypoint_y[0], color='green', label='Start')
     plt.scatter(waypoint_x[-1], waypoint_y[-1], color='red', label='Goal')
+    plt.gca().set_xticks(np.arange(-1.6, 1.6, 0.4))
+    plt.gca().set_yticks(np.arange(-1.6, 1.6, 0.4))
+    plt.xlim(-1.6, 1.6)
+    plt.ylim(-1.6, 1.6)
 
     # Add labels and a title to the plot
     plt.title(f"Path to {search_target}")
@@ -297,13 +360,14 @@ def plot_waypoints_for_goal(path_planner, waypoint_x, waypoint_y, search_target,
     # Show the plot if required
     plt.show()
 
-def find_turning_points(path_x, path_y, threshold_angle=15, min_distance=0.1):
+def find_turning_points(path_x, path_y, intermediate_flags, threshold_angle=15, min_distance=0.1):
     """
     Find turning points based on the angle between three consecutive points,
-    excluding points that are collinear or have very small angles.
+    and also include intermediate points.
     
     path_x: List of x-coordinates of the waypoints.
     path_y: List of y-coordinates of the waypoints.
+    intermediate_flags: List of flags indicating whether a point is intermediate or original.
     threshold_angle: Angle threshold in degrees to determine turning points.
     min_distance: Minimum distance between waypoints to consider for turning.
 
@@ -332,9 +396,6 @@ def find_turning_points(path_x, path_y, threshold_angle=15, min_distance=0.1):
 
     def are_points_collinear(p1, p2, p3, tolerance=1e-6):
         """Check if three points are collinear (i.e., they lie on the same straight line)."""
-        # Using the slope formula to check if the points are aligned
-        # (y2 - y1) / (x2 - x1) should be equal to (y3 - y2) / (x3 - x2)
-        # This avoids division by zero, and we just cross-multiply to check for collinearity
         return abs((p2[1] - p1[1]) * (p3[0] - p2[0]) - (p3[1] - p2[1]) * (p2[0] - p1[0])) < tolerance
 
     # Iterate over the waypoints and find turning points
@@ -342,6 +403,12 @@ def find_turning_points(path_x, path_y, threshold_angle=15, min_distance=0.1):
         x1, y1 = path_x[i - 1], path_y[i - 1]
         x2, y2 = path_x[i], path_y[i]
         x3, y3 = path_x[i + 1], path_y[i + 1]
+
+        # Always consider intermediate points as turning points
+        if intermediate_flags[i]:
+            turning_points_x.append(x2)
+            turning_points_y.append(y2)
+            continue  # Skip further checks for intermediate points
 
         # Check if the three points are collinear
         if are_points_collinear((x1, y1), (x2, y2), (x3, y3)):
@@ -365,16 +432,44 @@ def find_turning_points(path_x, path_y, threshold_angle=15, min_distance=0.1):
     return turning_points_x, turning_points_y
 
 
+def add_intermediate_points(waypoint_x, waypoint_y, max_distance=1.2):
+    new_waypoint_x = [waypoint_x[0]]  # Start with the first waypoint
+    new_waypoint_y = [waypoint_y[0]]
+    intermediate_flags = [False]  # False indicates that it's an original point, not intermediate
+    
+    for i in range(1, len(waypoint_x)):
+        # Calculate the distance between the current and previous waypoint
+        dist = np.sqrt((waypoint_x[i] - waypoint_x[i-1])**2 + (waypoint_y[i] - waypoint_y[i-1])**2)
+        
+        if dist > max_distance:
+            # Find the direction vector between the two waypoints
+            direction_x = (waypoint_x[i] - waypoint_x[i-1]) / dist
+            direction_y = (waypoint_y[i] - waypoint_y[i-1]) / dist
+            
+            # Add intermediate points
+            new_x = waypoint_x[i-1] + direction_x * (dist/2)
+            new_y = waypoint_y[i-1] + direction_y * (dist/2)
+            new_waypoint_x.append(new_x)
+            new_waypoint_y.append(new_y)
+            intermediate_flags.append(True)  # Mark this as an intermediate point
+        
+        # Append the original waypoint after adding any necessary intermediate points
+        new_waypoint_x.append(waypoint_x[i])
+        new_waypoint_y.append(waypoint_y[i])
+        intermediate_flags.append(False)  # Mark this as an original point
+
+    return new_waypoint_x, new_waypoint_y, intermediate_flags
+
 # main loop
 if __name__ == "__main__":
     # argument parsing for command-line execution
     parser = argparse.ArgumentParser("Fruit searching")
     parser.add_argument("--map", type=str, default='truemap_cv.txt')
     parser.add_argument("--search_list", type=str, default='search_list.txt')
-    parser.add_argument("--ip", metavar='', type=str, default='192.168.137.59')
+    parser.add_argument("--ip", metavar='', type=str, default='192.168.0.104')
     parser.add_argument("--port", metavar='', type=int, default=5000)
     parser.add_argument("--calib_dir", type=str, default="calibration/param/", help="Directory containing calibration parameters")
-    parser.add_argument("--yolo_model", default='YOLO/model/yolov8_model.pt', help="YOLO model file for object detection")
+    parser.add_argument("--yolo_model", default=r'C:\Users\Asus\Desktop\Monash year3\ece4078\milestone1\cv\model\best.pt', help="YOLO model file for object detection")
 
     args, _ = parser.parse_known_args()
 
@@ -385,6 +480,11 @@ if __name__ == "__main__":
     # Initialize the Pibot Control
     print("--------------------Initializing ROBOT & EKF--------------------")
     pictrl = PibotControl(args.ip,args.port)
+
+    # Remember tune the motion model
+    #kp = settling time,ki = error, kd =overshoot
+    pictrl.set_pid(1,1.5,1.0,0.1)
+    pictrl.set_radius(0.048)
 
     # Load camera and wheel calibration parameters
     camera_matrix = np.loadtxt(f"{args.calib_dir}/intrinsic.txt", delimiter=',')
@@ -402,14 +502,14 @@ if __name__ == "__main__":
     aruco_detector = aruco.ArucoSensor(robot, marker_length=0.06)
 
     print("====================Initializing Fruit Detector====================")
-            # Initialise detector (M3)
+    # Initialise detector (M3)
     obj_detector = YOLODetector(r"cv\model\YOLO_best.pt", use_gpu=False)
     fruit_predictor = Fruit_Predictor(camera_matrix_file=f"{args.calib_dir}/intrinsic.txt")
     cv_vis = np.ones((480,640,3))* 100
 
 
     print("====================Initializing Path Planner====================")
-
+    # Initialize Path Planner (M4)
     # Initialize the MapReader object
     map_reader = MapReader(map_fname= args.map, search_list= args.search_list)
 
@@ -429,6 +529,7 @@ if __name__ == "__main__":
     
     start_x, start_y = 0, 0
 
+    # Path Follower Initialized.
     cmd_controller = Command_Controller(ekf=ekf,
                                         aruco=aruco_detector,
                                         control=pictrl,
@@ -437,7 +538,7 @@ if __name__ == "__main__":
                                         )
     
     # Process each target's waypoints
-    print("\n====================Initializing Path Planner====================\n")
+    print("\n====================Path Planner Started to Search for Path====================\n")
     goal_count = 0
 
     # Open file once in write mode
@@ -449,11 +550,19 @@ if __name__ == "__main__":
 
             # Plan the path to the current goal
             waypoint_x, waypoint_y = path_planner.plan_path_based_mode(start_x, start_y, goal[0], goal[1])
-            turning_x, turning_y = find_turning_points(waypoint_x, waypoint_y, threshold_angle=15)
+            # Add intermediate points where necessary
+            waypoint_x, waypoint_y, intermediate_flags = add_intermediate_points(waypoint_x, waypoint_y, max_distance=1.2)
+
+            # Find turning points, including intermediate points
+            turning_x, turning_y = find_turning_points(waypoint_x, waypoint_y, intermediate_flags, threshold_angle=15)
 
             # Reverse the waypoints
             waypoint_x = waypoint_x[::-1]
             waypoint_y = waypoint_y[::-1]
+
+            # Reverse the turning points
+            turning_x = turning_x[::-1]
+            turning_y = turning_y[::-1]
 
             # Write the goal and waypoints to the file
             f.write(f"Goal {goal_count+1}: {search_targets[goal_count]} at ({goal[0]}, {goal[1]})\n")
@@ -471,7 +580,7 @@ if __name__ == "__main__":
                 is_turning_point = (px, py) in zip(turning_x, turning_y)
                 
                 # Check if the current waypoint is the final turning point
-                is_final_turning_point = (px, py) == (turning_x[0], turning_y[0])
+                is_final_turning_point = (px, py) == (turning_x[-1], turning_y[-1])
 
                 if is_final_turning_point:
                     print(f"Final Point: {px},{py}")
@@ -489,6 +598,17 @@ if __name__ == "__main__":
             # Update the start position for the next goal
             current_robot_state = cmd_controller.get_new_state(drive_meas=Drive(0, 0, 0), period=1)
             start_x, start_y = current_robot_state[0][0], current_robot_state[1][0]
+            
+            # Check if the updated position is inside an obstacle
+            if not path_planner.is_node_valid(path_planner.Node(path_planner.get_xy_index(start_x, path_planner.grid_min_x), 
+                                                                path_planner.get_xy_index(start_y, path_planner.grid_min_y), 
+                                                                cost=0.0, parent_idx=-1)):
+                print(f"Warning: The new position ({start_x}, {start_y}) is inside an obstacle.")
+                print("Setting the last valid waypoint as the new starting position.")
+                
+                # Set the last waypoint as the new start position
+                start_x, start_y = waypoint_x[-1], waypoint_y[-1]
+                print(f"New starting position set to ({start_x}, {start_y})")
 
             # Increment the goal count
             goal_count += 1

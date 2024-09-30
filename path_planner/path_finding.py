@@ -262,7 +262,18 @@ class PathPlanner:
         
     @staticmethod
     def compute_goal_positions(fruit_list, fruit_positions, search_list):
-        return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
+        goals = []
+        for fruit in search_list:
+            if fruit in fruit_list:
+                # If the fruit is in the fruit list, add its position to the goals
+                fruit_index = fruit_list.index(fruit)
+                goals.append(fruit_positions[fruit_index])
+            else:
+                # If the fruit is not in the fruit list, handle it as needed
+                print(f"Warning: {fruit} not found in the fruit list. It will need to be detected dynamically.")
+                # Optionally, you can append None or handle this fruit dynamically
+                # goals.append(None)  # Or leave it out to handle dynamically later
+        return goals
 
 
     ###################################################################
@@ -279,6 +290,8 @@ class PathPlanner:
     def plan_path_based_mode(self, start_x, start_y, goal_x, goal_y):
         pass
     
+    def replan(self, new_x, new_y, goal_x, goal_y):
+        return self.plan_path_based_mode(new_x, new_y, goal_x, goal_y)
 
     def are_points_collinear(self, x1, y1, x2, y2, x3, y3):
         """
@@ -319,6 +332,35 @@ class PathPlanner:
         plt.legend()
         plt.show()
 
+    def update_obstacle(self, fruit_type, new_position, size=None):
+        """
+        Updates the position of an obstacle in the path planner.
+        
+        Parameters:
+        - fruit_type: The type of fruit (used as an identifier for the obstacle).
+        - new_position: The new position of the obstacle as [x, y].
+        - size: Optional size of the obstacle. If not provided, the default obstacle size will be used.
+        """
+        # Default to the obstacle size if not specified
+        size = size if size else self.obstacle_size
+
+        # Check if the fruit's previous position exists in the obstacle list
+        for i in range(len(self.obstacle_x)):
+            # You can use a threshold to match the position (due to float precision errors)
+            if math.isclose(self.obstacle_x[i], new_position[0], abs_tol=0.01) and math.isclose(self.obstacle_y[i], new_position[1], abs_tol=0.01):
+                print(f"Removing old obstacle at ({self.obstacle_x[i]}, {self.obstacle_y[i]}) for {fruit_type}")
+                # Remove the old obstacle
+                self.obstacle_x.pop(i)
+                self.obstacle_y.pop(i)
+                break
+
+        # Add the new obstacle position
+        print(f"Adding new obstacle at {new_position} for {fruit_type}")
+        self.add_square_obstacle(new_position[0], new_position[1], size=size)
+
+        # Rebuild the obstacle grid to reflect the updated positions
+        self.build_obstacle_grid(self.obstacle_x, self.obstacle_y)
+
 class MathTools():
     @staticmethod
     def find_turning_angle(waypoint, robot_pose):
@@ -328,9 +370,9 @@ class MathTools():
         theta_r = robot_pose[2]                         # angle of robot from origin
         theta_w = np.arctan2(dy, dx)                    # angle of waypoint from robot
         theta_turn = theta_w - theta_r                  # angle to be turned by robot
-        theta_turn = MathTools.clamp_angle(theta_turn) # normalize angle to [-pi, pi], make sure it always turns the smallest angle
+        theta_turn = (theta_turn + np.pi) % (2 * np.pi) - np.pi  # normalize angle to [-pi, pi], make sure it always turns the smallest angle
         theta_deg = float(theta_turn * 180 / np.pi)
-        print(f"Angle calculated: {MathTools.deg(theta_w)} - {MathTools.deg(theta_r)} = {theta_deg}")
+        print(f"Angle calculated: {theta_w} - {theta_r} = {theta_turn}")
         return theta_deg
     
     @staticmethod
@@ -406,3 +448,6 @@ class MapReader:
     
     def compute_goal_positions(self, fruit_list, fruit_positions, search_list):
         return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
+    
+
+   

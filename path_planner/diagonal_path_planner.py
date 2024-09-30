@@ -2,8 +2,10 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from path_planner.path_finding import PathPlanner # from path_planner.path_finding import PathPlanner 
-#from path_finding import PathPlanner
+try:
+    from path_planner.path_finding import PathPlanner
+except ImportError:
+    from path_finding import PathPlanner 
 
 class DiagonalPathPlanner(PathPlanner):
     def __init__(self, grid_resolution, robot_radius, target_radius, obstacle_size=0.1):
@@ -36,7 +38,7 @@ class DiagonalPathPlanner(PathPlanner):
                                self.get_xy_index(start_y, self.grid_min_y), 0.0, -1)
         goal_node = self.Node(self.get_xy_index(goal_x, self.grid_min_x),
                               self.get_xy_index(goal_y, self.grid_min_y), 0.0, -1)
-
+        
         open_set, closed_set = dict(), dict()
         open_set[self.get_node_index(start_node)] = start_node
 
@@ -119,6 +121,9 @@ class DiagonalPathPlanner(PathPlanner):
             if mag_v1 == 0 or mag_v2 == 0:
                 return 0
             cos_theta = dot_product / (mag_v1 * mag_v2)
+            # Clamp cos_theta to the range [-1, 1] to avoid math domain errors
+            cos_theta = max(-1, min(1, cos_theta))
+            
             return math.acos(cos_theta) * 180 / math.pi
 
         for i in range(1, len(path_x) - 1):
