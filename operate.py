@@ -26,6 +26,7 @@ class Operate:
         # Initialise robot controller object
         self.detector_mode = int(args.cv_mode)
         self.pibot_control = PibotControl(args.ip, args.port)
+        self.pibot_control.set_mode(0)
         self.command = {'wheel_speed':[0, 0], # left wheel speed, right wheel speed
                         'save_slam': False,
                         'run_obj_detector': False,                       
@@ -34,8 +35,9 @@ class Operate:
                         }
         self.command_wait = []
                         
+
         # TODO: Tune PID parameters here. If you don't want to use PID, set use_pid = 0
-        self.pibot_control.set_pid(use_pid=0, kp=1, ki=0, kd=0)
+        self.pibot_control.set_pid(use_pid=1,kp=1.5,ki=0.4,kd=0.15)
         
         # Create a folder "lab_output" that stores the results of the lab
         self.lab_output_dir = 'lab_output/'
@@ -44,7 +46,10 @@ class Operate:
     
         # Initialise SLAM parameters (M2)
         self.ekf = self.init_ekf(args.calib_dir, args.ip)
+        self.ekf.set_var(Q = 0.1, R=0.05)
         self.aruco_sensor = ArucoSensor(self.ekf.robot, marker_length=0.06) # size of the ARUCO markers (6cm)
+
+
         
         # Initialise detector (M3)
         if args.ckpt == "":
@@ -92,6 +97,27 @@ class Operate:
             dt = time.time() - self.control_clock
             drive_meas = Drive(left_speed, right_speed, dt)
             self.control_clock = time.time()
+        if(self.pibot_control.get_mode() == 1):
+            left_speed, right_speed = self.command['wheel_speed']
+            if(left_speed > right_speed):
+                motion = 'turn right'
+            elif(left_speed < right_speed):
+                motion = 'turn left'
+            else:
+                motion = 'stop'
+            
+            theta = self.pibot_control.resolution/180 * np.pi
+            disp = abs(theta * (self.ekf.robot.baseline + 0.0539136)/2)
+            if motion == 'turn right':
+                self.pibot_control.set_angle_deg(angle= -self.pibot_control.resolution)
+                drive_meas = Drive(left_speed, right_speed, disp / 0.6)
+            elif motion == 'turn left':
+                self.pibot_control.set_angle_deg(angle= self.pibot_control.resolution)
+                drive_meas = Drive(left_speed, right_speed, disp / 0.6)
+            else:
+                drive_meas = Drive(0, 0, 0)
+                pass
+
         return drive_meas
     
     # camera control
@@ -104,12 +130,12 @@ class Operate:
         camera_matrix = np.loadtxt(fileK, delimiter=',')
         fileD = os.path.join(calib_dir, 'distCoeffs.txt')
         dist_coeffs = np.loadtxt(fileD, delimiter=',')
-        fileS = os.path.join(calib_dir, 'scale.txt')
-        scale = np.loadtxt(fileS, delimiter=',')
-        fileB = os.path.join(calib_dir, 'baseline.txt')
-        baseline = np.loadtxt(fileB, delimiter=',')
-        robot = Robot(baseline, scale, camera_matrix, dist_coeffs)
-        return EKF(robot)
+
+        scale = 0.69
+        baseline = 0.12
+
+        robot = Robot(scale=scale, baseline=baseline, camera_matrix=camera_matrix, dist_coeffs = dist_coeffs)
+        return EKF(robot, "truemap.txt")
 
     # SLAM with ARUCO markers       
     def update_slam(self, drive_meas):
@@ -231,19 +257,25 @@ class Operate:
     def update_keyboard(self):
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
-                self.command['wheel_speed'] = [0.6, 0.6]
+                self.command['wheel_speed'] = [0.52, 0.52]
+                self.pibot_control.set_mode(0)
+                self.pibot_control.set_pid(use_pid=1,kp=1.5,ki=0.5,kd=0.2)
                 pass # TODO
             # drive backward
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_DOWN:
-                self.command['wheel_speed'] = [-0.6, -0.6]
+                self.command['wheel_speed'] = [-0.54, -0.54]
+                self.pibot_control.set_mode(0)
+                self.pibot_control.set_pid(use_pid=1,kp=1.7,ki=0.8,kd=0.2)
                 pass # TODO
             # turn left
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
-                self.command['wheel_speed'] = [-0.45, 0.45]
+                self.command['wheel_speed'] = [-0.6, 0.6]
+                self.pibot_control.set_mode(1)
                 pass # TODO
             # drive right
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
-                self.command['wheel_speed'] = [0.45, -0.45]
+                self.command['wheel_speed'] = [0.6, -0.6]
+                self.pibot_control.set_mode(1)
                 pass # TODO
             # stop
             elif event.type == pygame.KEYUP or (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE):

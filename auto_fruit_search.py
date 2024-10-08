@@ -7,8 +7,8 @@ import json
 import time
 import argparse
 import numpy as np
-from pibot import PibotControl
-from pibot import Drive
+from pibot_vc import PibotControl
+from pibot_vc import Drive
 import matplotlib.pyplot as plt
 import math
 
