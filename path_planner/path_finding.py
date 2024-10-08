@@ -332,34 +332,23 @@ class PathPlanner:
         plt.legend()
         plt.show()
 
-    def update_obstacle(self, fruit_type, new_position, size=None):
+
+    def reset_obstacles(self):
         """
-        Updates the position of an obstacle in the path planner.
-        
-        Parameters:
-        - fruit_type: The type of fruit (used as an identifier for the obstacle).
-        - new_position: The new position of the obstacle as [x, y].
-        - size: Optional size of the obstacle. If not provided, the default obstacle size will be used.
+        Clears dynamic obstacles and re-adds the walls or other static obstacles.
         """
-        # Default to the obstacle size if not specified
-        size = size if size else self.obstacle_size
+        # Clear current obstacles
+        self.obstacle_x = []
+        self.obstacle_y = []
 
-        # Check if the fruit's previous position exists in the obstacle list
-        for i in range(len(self.obstacle_x)):
-            # You can use a threshold to match the position (due to float precision errors)
-            if math.isclose(self.obstacle_x[i], new_position[0], abs_tol=0.01) and math.isclose(self.obstacle_y[i], new_position[1], abs_tol=0.01):
-                print(f"Removing old obstacle at ({self.obstacle_x[i]}, {self.obstacle_y[i]}) for {fruit_type}")
-                # Remove the old obstacle
-                self.obstacle_x.pop(i)
-                self.obstacle_y.pop(i)
-                break
+        # Recreate static obstacles (walls)
+        self.create_walls(-1.6, -1.6, 1.6, 1.6, 0.01)
 
-        # Add the new obstacle position
-        print(f"Adding new obstacle at {new_position} for {fruit_type}")
-        self.add_square_obstacle(new_position[0], new_position[1], size=size)
-
-        # Rebuild the obstacle grid to reflect the updated positions
+        # Rebuild the obstacle grid with only static obstacles (walls)
         self.build_obstacle_grid(self.obstacle_x, self.obstacle_y)
+
+        print("Obstacles reset. Only walls remain.")
+
 
 class MathTools():
     @staticmethod
@@ -450,4 +439,3 @@ class MapReader:
         return [fruit_positions[fruit_list.index(fruit)] for fruit in search_list]
     
 
-   
