@@ -33,7 +33,7 @@ class Operate:
                         'save_obj_detector': False,
                         'save_image': False,
                         }
-        self.command_wait = []
+        self.rotate_mode = 0
                         
 
         # TODO: Tune PID parameters here. If you don't want to use PID, set use_pid = 0
@@ -135,7 +135,7 @@ class Operate:
         baseline = 0.12
 
         robot = Robot(scale=scale, baseline=baseline, camera_matrix=camera_matrix, dist_coeffs = dist_coeffs)
-        return EKF(robot, "truemap.txt")
+        return EKF(robot, "slam_t.txt")
 
     # SLAM with ARUCO markers       
     def update_slam(self, drive_meas):
@@ -270,12 +270,29 @@ class Operate:
             # turn left
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_LEFT:
                 self.command['wheel_speed'] = [-0.6, 0.6]
-                self.pibot_control.set_mode(1)
+                if(self.rotate_mode == 0):
+                    self.pibot_control.set_mode(0)
+                elif(self.rotate_mode == 1):
+                    self.pibot_control.set_mode(1)
+
                 pass # TODO
             # drive right
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_RIGHT:
                 self.command['wheel_speed'] = [0.6, -0.6]
-                self.pibot_control.set_mode(1)
+                if(self.rotate_mode == 0):
+                    self.pibot_control.set_mode(0)
+                elif(self.rotate_mode == 1):
+                    self.pibot_control.set_mode(1)
+                pass # TODO
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_q:
+                if(self.rotate_mode == 0):
+                    self.rotate_mode = 1
+                    self.pibot_control.set_mode(1)
+                    self.notification = 'Rotate mode switch to pulsing'
+                elif(self.rotate_mode == 1):
+                    self.rotate_mode = 0
+                    self.pibot_control.set_mode(0)
+                    self.notification = 'Rotate mode switch to continuous driving'
                 pass # TODO
             # stop
             elif event.type == pygame.KEYUP or (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE):
@@ -372,7 +389,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", metavar='', type=int, default=5000)
     parser.add_argument("--calib_dir", type=str, default="calibration/param/")
     parser.add_argument("--ckpt", default='cv/model/model.best.pt')
-    parser.add_argument("--cv_mode", default=0)
+    parser.add_argument("--cv_mode", default=1)
     args, _ = parser.parse_known_args()
     
     pygame.font.init() 
