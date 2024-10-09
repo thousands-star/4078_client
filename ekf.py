@@ -24,7 +24,7 @@ class EKF:
 
         # Covariance matrix
         self.P = np.zeros((3,3))
-        self.init_lm_cov = 1e3
+        self.init_lm_cov = 1e2
         self.robot_init_state = None
         self.lm_pics = []
         for i in range(1, 11):
@@ -33,7 +33,7 @@ class EKF:
         f_ = f'./ui/8bit/lm_unknown.png'
         self.lm_pics.append(pygame.image.load(f_))
         self.pibot_pic = pygame.image.load(f'./ui/8bit/pibot_top.png')
-        self.var = [0.3, 0.01]
+        self.var = [0.1, 0.1]
         
     def reset(self):
         self.robot.state = np.zeros((3, 1))
@@ -102,8 +102,12 @@ class EKF:
             if int(lm_new.shape[1]) > 2:
                 R,t = self.umeyama(lm_new, lm_prev)
                 theta = math.atan2(R[1][0], R[0][0])
-                self.robot.state[:2]=t[:2]
-                self.robot.state[2]=theta
+
+                noise_t = np.random.normal(0, 0.01, size=t.shape)
+                noise_theta = np.random.normal(0,0.01)
+
+                self.robot.state[:2]=t[:2] + noise_t
+                self.robot.state[2]=theta + noise_theta
                 return True
             else:
                 return False
